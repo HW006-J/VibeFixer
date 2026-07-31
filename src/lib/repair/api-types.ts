@@ -1,3 +1,5 @@
+import type { LiveDemoState } from "./live-state";
+
 export type RepairRequestBody = {
   repositoryUrl: string;
 };
@@ -52,6 +54,10 @@ export type RepairResetSuccessResponse = {
 };
 
 export type RepairResetApiResponse = RepairResetSuccessResponse | RepairErrorResponse;
+
+export type LiveStateSuccessResponse = { ok: true } & LiveDemoState;
+
+export type LiveStateApiResponse = LiveStateSuccessResponse | RepairErrorResponse;
 
 export type RepairPreflightResponse = {
   ok: true;

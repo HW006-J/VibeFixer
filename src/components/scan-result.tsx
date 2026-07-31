@@ -1,6 +1,6 @@
 import type { AuditCoverage, AuditFinding } from "@/lib/audit/types";
 import type { ScanErrorResponse } from "@/lib/scanner/api-types";
-import { LiveValidationPanel } from "./live-validation-panel";
+import { LiveStatePanel } from "./live-state-panel";
 
 type SuccessState = {
   status: "success";
@@ -10,6 +10,8 @@ type SuccessState = {
   findings: AuditFinding[];
   coverage: AuditCoverage;
   durationMs: number;
+  /** Incremented on every scan submission (even of the same URL) — forces LiveStatePanel to re-derive live state from the server rather than showing a result from a previous scan. */
+  scanToken: number;
 };
 
 type ErrorState = {
@@ -216,7 +218,7 @@ export function ScanResult({ state }: { state: ScanResultState }) {
     );
   }
 
-  const { findings, coverage, repository, repositoryUrl, isDemoRepository } = state;
+  const { findings, coverage, repository, repositoryUrl, isDemoRepository, scanToken } = state;
 
   if (coverage.filesScanned.length === 0) {
     return (
@@ -273,7 +275,7 @@ export function ScanResult({ state }: { state: ScanResultState }) {
 
       {criticalFindings.length > 0 &&
         (isDemoRepository ? (
-          <LiveValidationPanel repositoryUrl={repositoryUrl} />
+          <LiveStatePanel repositoryUrl={repositoryUrl} refreshToken={scanToken} />
         ) : (
           <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-4 text-sm text-zinc-400">
             Live validation requires an authorised connected test environment.
