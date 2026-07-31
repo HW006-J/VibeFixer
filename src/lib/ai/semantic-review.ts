@@ -1,7 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
-import type { AiReviewAssessment, AiSemanticReview } from "../audit/types";
+import { generateStructuredJson } from "./generate-structured";
+import { isGeminiConfigured } from "./gemini-client";
+import type { AiSemanticReview } from "../audit/types";
 
-const MODEL = "claude-opus-5";
 export const MAX_AI_REVIEWS_PER_SCAN = 5;
 
 const RESPONSE_SCHEMA = {
@@ -14,18 +14,9 @@ const RESPONSE_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-let cachedClient: Anthropic | null = null;
-
-function getClient(): Anthropic | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-  if (!cachedClient) cachedClient = new Anthropic({ apiKey });
-  return cachedClient;
-}
-
-/** True only when a server-only ANTHROPIC_API_KEY is configured. */
+/** True only when a server-only GEMINI_API_KEY is configured. */
 export function isAiSemanticReviewAvailable(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  return isGeminiConfigured();
 }
 
 export type SemanticReviewInput = {
@@ -51,7 +42,7 @@ ${input.evidence}`;
 }
 
 /**
- * Sends one policy clause to a real Claude model for a semantic opinion.
+ * Sends one policy clause to a real Gemini model for a semantic opinion.
  * Only ever called for clauses the deterministic rules could not classify.
  * Returns `{ performed: false }` whenever no API key is configured or the
  * call fails for any reason — callers must never treat that as a review
@@ -60,41 +51,23 @@ ${input.evidence}`;
 export async function reviewPolicyClauseSemantically(
   input: SemanticReviewInput,
 ): Promise<AiSemanticReview | { performed: false }> {
-  const client = getClient();
-  if (!client) return { performed: false };
+  const outcome = await generateStructuredJson<{
+    assessment: AiSemanticReview["assessment"];
+    reasoning: string;
+  }>({
+    prompt: buildPrompt(input),
+    schema: RESPONSE_SCHEMA,
+    // Uses generateStructuredJson's default budget — current Gemini models
+    // spend a variable number of tokens on internal "thinking" before the
+    // visible JSON reply, drawn from the same budget (see generate-structured.ts).
+  });
 
-  try {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 500,
-      output_config: {
-        effort: "low",
-        format: { type: "json_schema", schema: RESPONSE_SCHEMA },
-      },
-      messages: [{ role: "user", content: buildPrompt(input) }],
-    });
+  if (!outcome.performed) return { performed: false };
 
-    if (response.stop_reason === "refusal") {
-      return { performed: false };
-    }
-
-    const textBlock = response.content.find(
-      (block): block is Anthropic.TextBlock => block.type === "text",
-    );
-    if (!textBlock) return { performed: false };
-
-    const parsed = JSON.parse(textBlock.text) as {
-      assessment: AiReviewAssessment;
-      reasoning: string;
-    };
-
-    return {
-      performed: true,
-      assessment: parsed.assessment,
-      reasoning: parsed.reasoning,
-      model: MODEL,
-    };
-  } catch {
-    return { performed: false };
-  }
+  return {
+    performed: true,
+    assessment: outcome.data.assessment,
+    reasoning: outcome.data.reasoning,
+    model: outcome.model,
+  };
 }

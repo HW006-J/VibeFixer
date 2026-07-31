@@ -11,7 +11,7 @@ import {
 /**
  * Runs the full audit pipeline: discover SQL statements → build the schema
  * and RLS inventory → run deterministic rules → optionally send review-tier
- * findings for a real AI semantic opinion (only when ANTHROPIC_API_KEY is
+ * findings for a real AI semantic opinion (only when GEMINI_API_KEY is
  * configured, capped, and only ever attached when a real call succeeded).
  */
 export async function runAudit(

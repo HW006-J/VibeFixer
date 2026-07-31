@@ -34,3 +34,23 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Known limitations
+
+**Policy apply/reset currently requires the authenticated local Supabase CLI, not Vercel serverless execution.**
+
+`src/lib/repair/db-admin.ts` applies and resets the demo RLS policy by shelling out to the
+Supabase CLI (`supabase db query --linked`) on the machine running the app. This is genuine,
+real DDL execution — not a mock — and is fully supported for running the demo locally
+(`npm run dev`) on a machine where the CLI is installed, authenticated, and linked to the
+demo Supabase project via `supabase link`.
+
+It is **not** currently compatible with a Vercel serverless deployment: Vercel functions
+don't have the Supabase CLI installed, don't hold a CLI auth session, and can't `exec` an
+external binary in that environment. Running the AI-repair "Apply" and "Reset" steps on a
+Vercel-hosted deployment of this app will fail with `CLI_UNAVAILABLE`. The scan, detection,
+live-validation (read-only), and AI-proposal steps all work over plain HTTPS and are
+unaffected by this limitation — only the two mutating steps (apply/reset) require the local
+CLI mechanism. Replacing this with a serverless-compatible mutation path (e.g. calling
+Supabase's management API directly with a scoped service credential) was intentionally left
+out of scope for this task.
