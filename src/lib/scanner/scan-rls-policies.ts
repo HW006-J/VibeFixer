@@ -73,6 +73,34 @@ function extractRole(statement: string): string | null {
   return raw.length > 0 ? raw : null;
 }
 
+/**
+ * Describes exactly what the detected USING (true) clause exposes for the
+ * policy's declared operation, so the explanation never claims a broader
+ * capability (e.g. modification) than the policy actually grants.
+ */
+function describeOperationAccess(operation: string | null): string {
+  switch (operation) {
+    case "SELECT":
+      return "read every tenant's rows";
+    case "INSERT":
+      return "insert rows on behalf of any tenant";
+    case "UPDATE":
+      return "update every tenant's rows";
+    case "DELETE":
+      return "delete every tenant's rows";
+    case "ALL":
+      return "read, insert, update, and delete every tenant's rows";
+    default:
+      return "access every tenant's rows for this operation";
+  }
+}
+
+function buildExplanation(operation: string | null, table: string | null): string {
+  const access = describeOperationAccess(operation);
+  const scope = table ? ` in \`${table}\`` : "";
+  return `This policy's USING clause is the literal boolean true, so PostgreSQL treats it as satisfied for every row regardless of who is asking. Row Level Security is effectively disabled: any client holding this role can ${access}${scope}. Scope the expression to the requesting user instead, e.g. USING (auth.uid() = owner_id).`;
+}
+
 export type ScanRlsPoliciesResult = {
   findings: RlsFinding[];
   /** Total CREATE POLICY statements the scanner actually parsed, across all files, regardless of outcome. */
@@ -127,8 +155,7 @@ export function scanRlsPolicies(repository: string, files: ScannedFile[]): ScanR
         operation,
         role,
         evidence: statement.trim(),
-        explanation:
-          "This policy's USING clause is the literal boolean true, so PostgreSQL treats it as satisfied for every row regardless of who is asking. Row Level Security is effectively disabled: any client holding this role can read or modify every tenant's rows. Scope the expression to the requesting user instead, e.g. USING (auth.uid() = owner_id).",
+        explanation: buildExplanation(operation, table),
       });
     }
   }

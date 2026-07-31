@@ -120,4 +120,61 @@ describe("scanRlsPolicies", () => {
     expect(policiesInspected).toBe(3);
     expect(findings).toHaveLength(2);
   });
+
+  describe("explanation is operation-aware and does not overclaim", () => {
+    function explanationFor(forClause: string): string {
+      const file = fixtureFile("supabase/migrations/op.sql", [
+        `CREATE POLICY "p" ON public.clients ${forClause} TO authenticated USING (true);`,
+      ]);
+      const { findings } = scanRlsPolicies(REPOSITORY, [file]);
+      expect(findings).toHaveLength(1);
+      return findings[0].explanation;
+    }
+
+    it("matches the real demo fixture: authenticated readers can only read, never modify", () => {
+      const explanation = explanationFor("FOR SELECT");
+
+      expect(explanation).toContain("read every tenant's rows in `public.clients`");
+      expect(explanation).not.toMatch(/\b(modify|insert|update|delete)\b/i);
+    });
+
+    it("describes UPDATE policies as allowing updates, not reads/inserts/deletes", () => {
+      const explanation = explanationFor("FOR UPDATE");
+
+      expect(explanation).toContain("update every tenant's rows");
+      expect(explanation).not.toMatch(/\b(read|insert|delete)\b/i);
+    });
+
+    it("describes DELETE policies as allowing deletes only", () => {
+      const explanation = explanationFor("FOR DELETE");
+
+      expect(explanation).toContain("delete every tenant's rows");
+      expect(explanation).not.toMatch(/\b(read|insert|update)\b/i);
+    });
+
+    it("describes INSERT policies as allowing inserts only", () => {
+      const explanation = explanationFor("FOR INSERT");
+
+      expect(explanation).toContain("insert rows on behalf of any tenant");
+      expect(explanation).not.toMatch(/\b(read|update|delete)\b/i);
+    });
+
+    it("describes FOR ALL policies as allowing every operation", () => {
+      const explanation = explanationFor("FOR ALL");
+
+      expect(explanation).toContain("read, insert, update, and delete every tenant's rows");
+    });
+
+    it("does not name a specific CRUD verb when no operation was detected", () => {
+      const file = fixtureFile("supabase/migrations/no-for-clause.sql", [
+        'CREATE POLICY "p" ON public.clients TO authenticated USING (true);',
+      ]);
+      const { findings } = scanRlsPolicies(REPOSITORY, [file]);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].operation).toBeNull();
+      expect(findings[0].explanation).not.toMatch(/\b(read|insert|update|delete)\b/i);
+      expect(findings[0].explanation).toContain("access every tenant's rows");
+    });
+  });
 });

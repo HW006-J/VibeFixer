@@ -73,26 +73,29 @@ function FindingCard({ finding }: { finding: RlsFinding }) {
 
       <h3 className="mt-3 text-lg font-semibold text-red-50">{finding.title}</h3>
 
-      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
-        <div>
+      <dl className="mt-3 flex flex-col gap-3 text-sm">
+        <div className="min-w-0">
           <dt className="text-red-300/70">File</dt>
-          <dd className="font-mono text-red-100">{finding.filePath}</dd>
+          <dd className="mt-0.5 break-all font-mono text-red-100">{finding.filePath}</dd>
         </div>
-        <div>
-          <dt className="text-red-300/70">Line</dt>
-          <dd className="font-mono text-red-100">{finding.line}</dd>
-        </div>
-        <div>
-          <dt className="text-red-300/70">Table</dt>
-          <dd className="font-mono text-red-100">{finding.table ?? "unknown"}</dd>
-        </div>
-        <div>
-          <dt className="text-red-300/70">Operation</dt>
-          <dd className="font-mono text-red-100">{finding.operation ?? "unknown"}</dd>
-        </div>
-        <div>
-          <dt className="text-red-300/70">Role</dt>
-          <dd className="font-mono text-red-100">{finding.role ?? "unknown"}</dd>
+
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
+          <div className="min-w-0">
+            <dt className="text-red-300/70">Line</dt>
+            <dd className="font-mono text-red-100">{finding.line}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-red-300/70">Table</dt>
+            <dd className="break-words font-mono text-red-100">{finding.table ?? "unknown"}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-red-300/70">Operation</dt>
+            <dd className="break-words font-mono text-red-100">{finding.operation ?? "unknown"}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-red-300/70">Role</dt>
+            <dd className="break-words font-mono text-red-100">{finding.role ?? "unknown"}</dd>
+          </div>
         </div>
       </dl>
 
