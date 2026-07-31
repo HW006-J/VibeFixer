@@ -1,6 +1,6 @@
 import type { AuditCoverage, AuditFinding } from "@/lib/audit/types";
 import type { ScanErrorResponse } from "@/lib/scanner/api-types";
-import { LiveStatePanel } from "./live-state-panel";
+import { SecurityDemoPanel } from "./security-demo-panel";
 
 type SuccessState = {
   status: "success";
@@ -132,16 +132,18 @@ function CriticalFindingCard({ finding, isDemoRepository }: { finding: AuditFind
 
         <h3 className="mt-3 text-lg font-semibold text-red-50">{finding.title}</h3>
 
-        <FindingMeta finding={finding} />
+        <p className="mt-3 text-sm leading-relaxed text-red-100/90">{finding.explanation}</p>
 
-        <div className="mt-4">
-          <p className="text-sm text-red-300/70">Evidence</p>
-          <pre className="mt-1 overflow-x-auto rounded-md bg-black/60 p-3 text-xs text-red-100">
-            <code>{finding.evidence}</code>
-          </pre>
-        </div>
-
-        <p className="mt-4 text-sm leading-relaxed text-red-100/90">{finding.explanation}</p>
+        <details className="mt-4 text-xs text-red-300/70">
+          <summary className="cursor-pointer select-none">Technical details</summary>
+          <FindingMeta finding={finding} />
+          <div className="mt-4">
+            <p className="text-sm text-red-300/70">Raw vulnerable SQL</p>
+            <pre className="mt-1 overflow-x-auto rounded-md bg-black/60 p-3 text-xs text-red-100">
+              <code>{finding.evidence}</code>
+            </pre>
+          </div>
+        </details>
       </div>
 
       <span className="inline-flex w-fit items-center rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-0.5 text-xs text-zinc-400">
@@ -220,6 +222,17 @@ export function ScanResult({ state }: { state: ScanResultState }) {
 
   const { findings, coverage, repository, repositoryUrl, isDemoRepository, scanToken } = state;
 
+  function liveSection(sourceState: "finding_present" | "no_finding") {
+    if (!isDemoRepository) {
+      return (
+        <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-4 text-sm text-zinc-400">
+          Live validation requires an authorised connected test environment.
+        </div>
+      );
+    }
+    return <SecurityDemoPanel repositoryUrl={repositoryUrl} refreshToken={scanToken} sourceState={sourceState} />;
+  }
+
   if (coverage.filesScanned.length === 0) {
     return (
       <div className="flex flex-col gap-4">
@@ -254,6 +267,7 @@ export function ScanResult({ state }: { state: ScanResultState }) {
             failure pattern was detected in the SQL that was reachable to this scanner.
           </p>
         </div>
+        {liveSection("no_finding")}
       </div>
     );
   }
@@ -273,14 +287,7 @@ export function ScanResult({ state }: { state: ScanResultState }) {
         <ReviewFindingCard key={finding.id} finding={finding} />
       ))}
 
-      {criticalFindings.length > 0 &&
-        (isDemoRepository ? (
-          <LiveStatePanel repositoryUrl={repositoryUrl} refreshToken={scanToken} />
-        ) : (
-          <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-4 text-sm text-zinc-400">
-            Live validation requires an authorised connected test environment.
-          </div>
-        ))}
+      {criticalFindings.length > 0 && liveSection("finding_present")}
     </div>
   );
 }
