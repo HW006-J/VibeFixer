@@ -24,3 +24,19 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/*
+ * One-shot reveal for already-confirmed scan facts once the real API
+ * response has arrived. Purely decorative — it never gates when data
+ * becomes available, only how it visually appears.
+ */
+@keyframes fact-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
