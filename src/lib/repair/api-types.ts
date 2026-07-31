@@ -52,3 +52,15 @@ export type RepairResetSuccessResponse = {
 };
 
 export type RepairResetApiResponse = RepairResetSuccessResponse | RepairErrorResponse;
+
+export type RepairPreflightResponse = {
+  ok: true;
+  /** True only when a real round-trip check (CLI resolved, project linked and matching, authenticated, query succeeded) passed. */
+  ready: boolean;
+  /** Present only when ready is false — a stable, non-secret error category (e.g. CLI_UNAVAILABLE, PROJECT_LINK_MISMATCH). */
+  error?: string;
+  /** Present only when ready is false — a safe, sanitised explanation. Never raw CLI output. */
+  message?: string;
+};
+
+export type RepairPreflightApiResponse = RepairPreflightResponse | RepairErrorResponse;

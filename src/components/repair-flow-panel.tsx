@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { LiveValidationApiResponse } from "@/lib/scanner/api-types";
 import type {
   RepairApplyApiResponse,
+  RepairPreflightApiResponse,
   RepairProposeApiResponse,
   RepairProposeSuccessResponse,
   RepairResetApiResponse,
@@ -33,6 +34,12 @@ type ResetState =
   | { step: "done"; restoredExpression: string }
   | { step: "error"; message: string };
 
+type PreflightState =
+  | { step: "idle" }
+  | { step: "ready" }
+  | { step: "not-ready"; message: string }
+  | { step: "error"; message: string };
+
 const buttonClasses =
   "inline-flex h-10 items-center justify-center rounded-md px-5 text-sm font-semibold text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed disabled:opacity-60";
 
@@ -59,6 +66,42 @@ export function RepairFlowPanel({ repositoryUrl }: { repositoryUrl: string }) {
   const [apply, setApply] = useState<ApplyState>({ step: "idle" });
   const [reverify, setReverify] = useState<ReverifyState>({ step: "idle" });
   const [reset, setReset] = useState<ResetState>({ step: "idle" });
+  const [preflight, setPreflight] = useState<PreflightState>({ step: "idle" });
+
+  const canApply = propose.step === "done" && propose.data.valid;
+
+  // Before ever offering "Approve and apply", verify the local Supabase CLI
+  // mutation channel is actually ready (binary resolvable, project linked
+  // and matching, authenticated, live round trip succeeds) — so a broken
+  // local setup surfaces as a specific setup error instead of only being
+  // discovered after a human clicks Apply.
+  useEffect(() => {
+    if (!canApply || preflight.step !== "idle") return;
+    let cancelled = false;
+    fetch("/api/repair/preflight")
+      .then((response) => response.json() as Promise<RepairPreflightApiResponse>)
+      .then((data) => {
+        if (cancelled) return;
+        if (!data.ok) {
+          setPreflight({ step: "error", message: data.error.message });
+        } else if (data.ready) {
+          setPreflight({ step: "ready" });
+        } else {
+          setPreflight({
+            step: "not-ready",
+            message: data.message ?? "The local database mutation channel is not ready.",
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPreflight({ step: "error", message: "Could not reach the readiness check service." });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canApply, preflight.step]);
 
   async function runPropose() {
     setPropose({ step: "loading" });
@@ -114,13 +157,12 @@ export function RepairFlowPanel({ repositoryUrl }: { repositoryUrl: string }) {
         setApply({ step: "idle" });
         setReverify({ step: "idle" });
         setPropose({ step: "idle" });
+        setPreflight({ step: "idle" });
       }
     } catch {
       setReset({ step: "error", message: "Could not reach the repair reset service." });
     }
   }
-
-  const canApply = propose.step === "done" && propose.data.valid;
 
   return (
     <div className="rounded-lg border border-sky-500/40 bg-sky-950/20 p-5">
@@ -210,15 +252,30 @@ export function RepairFlowPanel({ repositoryUrl }: { repositoryUrl: string }) {
               <pre className="mt-1 overflow-x-auto rounded-md bg-black/40 p-3 text-xs text-sky-100">
                 <code>USING ({propose.data.trustedExpression})</code>
               </pre>
-              <button
-                type="button"
-                onClick={runApply}
-                disabled={apply.step === "loading"}
-                aria-busy={apply.step === "loading"}
-                className={`mt-3 bg-emerald-600 hover:bg-emerald-500 focus-visible:ring-emerald-400 ${buttonClasses}`}
-              >
-                {apply.step === "loading" ? "Applying…" : "Approve and apply this fix"}
-              </button>
+
+              {preflight.step === "idle" && (
+                <p className="mt-2 text-xs text-sky-300/70">
+                  Checking whether the local database mutation channel is ready…
+                </p>
+              )}
+
+              {preflight.step === "ready" && (
+                <button
+                  type="button"
+                  onClick={runApply}
+                  disabled={apply.step === "loading"}
+                  aria-busy={apply.step === "loading"}
+                  className={`mt-3 bg-emerald-600 hover:bg-emerald-500 focus-visible:ring-emerald-400 ${buttonClasses}`}
+                >
+                  {apply.step === "loading" ? "Applying…" : "Approve and apply this fix"}
+                </button>
+              )}
+
+              {(preflight.step === "not-ready" || preflight.step === "error") && (
+                <p role="alert" className="mt-2 text-sm leading-relaxed text-amber-300">
+                  Cannot apply — the local database mutation channel is not ready: {preflight.message}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -226,7 +283,8 @@ export function RepairFlowPanel({ repositoryUrl }: { repositoryUrl: string }) {
 
       {apply.step === "error" && (
         <p role="alert" className="mt-3 text-sm leading-relaxed text-amber-300">
-          {apply.message}
+          The AI proposal above succeeded and was validated, but applying it to the database
+          failed: {apply.message}
         </p>
       )}
 
