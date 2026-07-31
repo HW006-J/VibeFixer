@@ -4,10 +4,10 @@ import { useRef, useState } from "react";
 import type { ScanApiResponse } from "@/lib/scanner/api-types";
 import { ScanResult, type ScanResultState } from "./scan-result";
 
-const AUTHORISED_REPOSITORY_URL = "https://github.com/HW006-J/rls-red-alert-demo-target";
+const EXAMPLE_REPOSITORY_URL = "https://github.com/HW006-J/rls-red-alert-demo-target";
 
 export function RepositoryScanner() {
-  const [repositoryUrl, setRepositoryUrl] = useState(AUTHORISED_REPOSITORY_URL);
+  const [repositoryUrl, setRepositoryUrl] = useState(EXAMPLE_REPOSITORY_URL);
   const [isScanning, setIsScanning] = useState(false);
   const [result, setResult] = useState<ScanResultState | null>(null);
   const scanInFlight = useRef(false);
@@ -18,6 +18,7 @@ export function RepositoryScanner() {
     if (scanInFlight.current) return;
     scanInFlight.current = true;
 
+    const submittedUrl = repositoryUrl;
     setIsScanning(true);
     setResult(null);
 
@@ -25,7 +26,7 @@ export function RepositoryScanner() {
       const response = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repositoryUrl }),
+        body: JSON.stringify({ repositoryUrl: submittedUrl }),
       });
 
       const data = (await response.json()) as ScanApiResponse;
@@ -36,6 +37,8 @@ export function RepositoryScanner() {
         setResult({
           status: "success",
           repository: data.repository,
+          repositoryUrl: submittedUrl,
+          isDemoRepository: data.isDemoRepository,
           filesScanned: data.filesScanned,
           policiesInspected: data.policiesInspected,
           findings: data.findings,
@@ -75,9 +78,14 @@ export function RepositoryScanner() {
             disabled={isScanning}
             className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-4 py-2.5 font-mono text-sm text-zinc-100 outline-none transition-colors focus:border-red-500 focus:ring-2 focus:ring-red-500/40 disabled:opacity-60"
           />
-          <span className="inline-flex w-fit items-center rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-0.5 text-xs text-zinc-400">
-            Authorised demonstration repository
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex w-fit items-center rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-0.5 text-xs text-zinc-400">
+              Public repository static analysis
+            </span>
+            <span className="text-xs text-zinc-500">
+              Only scan repositories you own or are authorised to review.
+            </span>
+          </div>
         </div>
 
         <button

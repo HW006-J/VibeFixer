@@ -1,9 +1,12 @@
 import type { RlsFinding } from "@/lib/scanner/types";
 import type { ScanErrorResponse } from "@/lib/scanner/api-types";
+import { LiveValidationPanel } from "./live-validation-panel";
 
 type SuccessState = {
   status: "success";
   repository: string;
+  repositoryUrl: string;
+  isDemoRepository: boolean;
   filesScanned: string[];
   policiesInspected: number;
   findings: RlsFinding[];
@@ -31,7 +34,7 @@ function PipelineFacts({ state }: { state: SuccessState }) {
   const { repository, filesScanned, policiesInspected, findings, durationMs } = state;
 
   const facts = [
-    `Repository authorised: ${repository}`,
+    `Repository scanned: ${repository}`,
     `${filesScanned.length} SQL ${pluralise(filesScanned.length, "file", "files")} fetched from GitHub`,
     `${policiesInspected} RLS ${pluralise(policiesInspected, "policy", "policies")} inspected`,
     findings.length > 0
@@ -126,7 +129,7 @@ export function ScanResult({ state }: { state: ScanResultState }) {
     );
   }
 
-  const { findings, filesScanned, repository } = state;
+  const { findings, filesScanned, repository, repositoryUrl, isDemoRepository } = state;
 
   if (filesScanned.length === 0) {
     return (
@@ -139,7 +142,8 @@ export function ScanResult({ state }: { state: ScanResultState }) {
           <p className="mt-2 text-sm leading-relaxed">
             No files under <code className="font-mono">supabase/migrations/</code> or a{" "}
             <code className="font-mono">supabase/schema.sql</code> were found in{" "}
-            <span className="font-mono">{repository}</span>.
+            <span className="font-mono">{repository}</span>. This scanner only supports
+            repositories that store their Supabase policy SQL in those locations.
           </p>
         </div>
       </div>
@@ -167,9 +171,25 @@ export function ScanResult({ state }: { state: ScanResultState }) {
   return (
     <div className="flex flex-col gap-4">
       <PipelineFacts state={state} />
+
       {findings.map((finding) => (
-        <FindingCard key={finding.id} finding={finding} />
+        <div key={finding.id} className="flex flex-col gap-2">
+          <FindingCard finding={finding} />
+          <span className="inline-flex w-fit items-center rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-0.5 text-xs text-zinc-400">
+            {isDemoRepository
+              ? "Static repository finding — run live validation below to confirm on the deployed database"
+              : "Static repository finding — live deployment not tested"}
+          </span>
+        </div>
       ))}
+
+      {isDemoRepository ? (
+        <LiveValidationPanel repositoryUrl={repositoryUrl} />
+      ) : (
+        <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-4 text-sm text-zinc-400">
+          Live validation requires an authorised connected test environment.
+        </div>
+      )}
     </div>
   );
 }
