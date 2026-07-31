@@ -39,9 +39,8 @@ export function RepositoryScanner() {
           repository: data.repository,
           repositoryUrl: submittedUrl,
           isDemoRepository: data.isDemoRepository,
-          filesScanned: data.filesScanned,
-          policiesInspected: data.policiesInspected,
           findings: data.findings,
+          coverage: data.coverage,
           durationMs: data.durationMs,
         });
       }

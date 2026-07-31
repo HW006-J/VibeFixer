@@ -15,9 +15,9 @@ export default function Home() {
             RLS Red Alert
           </h1>
           <p className="max-w-xl text-sm leading-relaxed text-zinc-400 sm:text-base">
-            Statically scans Supabase migrations in any public GitHub repository for dangerous
-            Row Level Security policies that quietly disable tenant isolation, and can prove one
-            specific finding live against an isolated demonstration database.
+            Audits every discovered Supabase RLS policy against common tenant-isolation failure
+            patterns. Complex policies are clearly marked for semantic or manual review, and one
+            confirmed finding can be proven live against an isolated demonstration database.
           </p>
         </header>
 

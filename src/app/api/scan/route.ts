@@ -8,7 +8,7 @@ import {
   fetchSupabaseFiles,
   type GithubFetchErrorCode,
 } from "@/lib/github/fetch-supabase-files";
-import { scanRlsPolicies } from "@/lib/scanner/scan-rls-policies";
+import { runAudit } from "@/lib/audit/run-audit";
 import type { ScanErrorResponse, ScanSuccessResponse } from "@/lib/scanner/api-types";
 
 export const runtime = "nodejs";
@@ -77,8 +77,6 @@ export async function POST(request: Request) {
     );
   }
 
-  const startedAt = Date.now();
-
   try {
     const filesResult = await fetchSupabaseFiles(parsed.repository, process.env.GITHUB_TOKEN);
 
@@ -91,19 +89,18 @@ export async function POST(request: Request) {
     }
 
     const repositoryLabel = `${parsed.repository.owner}/${parsed.repository.repo}`;
-    const { findings, policiesInspected } = scanRlsPolicies(repositoryLabel, filesResult.files);
-
     const demoRepository = process.env.DEMO_GITHUB_REPOSITORY;
     const isDemoRepository = Boolean(demoRepository) && isSameRepository(parsed.repository, demoRepository!);
 
+    const report = await runAudit(repositoryLabel, isDemoRepository, filesResult.files);
+
     const responseBody: ScanSuccessResponse = {
       ok: true,
-      repository: repositoryLabel,
-      isDemoRepository,
-      filesScanned: filesResult.files.map((file) => file.path),
-      policiesInspected,
-      findings,
-      durationMs: Date.now() - startedAt,
+      repository: report.repository,
+      isDemoRepository: report.isDemoRepository,
+      findings: report.findings,
+      coverage: report.coverage,
+      durationMs: report.durationMs,
     };
 
     return NextResponse.json(responseBody, { status: 200 });

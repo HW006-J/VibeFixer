@@ -1,4 +1,4 @@
-import type { RlsFinding } from "./types";
+import type { AuditCoverage, AuditFinding } from "../audit/types";
 
 export type ScanRequestBody = {
   repositoryUrl: string;
@@ -9,9 +9,8 @@ export type ScanSuccessResponse = {
   repository: string;
   /** True only for the single repository configured in DEMO_GITHUB_REPOSITORY. */
   isDemoRepository: boolean;
-  filesScanned: string[];
-  policiesInspected: number;
-  findings: RlsFinding[];
+  findings: AuditFinding[];
+  coverage: AuditCoverage;
   durationMs: number;
 };
 
