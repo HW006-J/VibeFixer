@@ -13,9 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "RLS Red Alert",
-  description:
-    "Scans Supabase migrations for dangerous Row Level Security policies that disable tenant isolation.",
+  title: "Vibe Fixer",
+  description: "Security checks for AI-built Supabase applications.",
 };
 
 export default function RootLayout({

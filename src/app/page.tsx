@@ -12,12 +12,16 @@ export default function Home() {
             </span>
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-zinc-50 sm:text-4xl">
-            RLS Red Alert
+            Vibe Fixer
           </h1>
+          <p className="text-sm font-medium text-zinc-300 sm:text-base">
+            Security checks for AI-built Supabase applications.
+          </p>
           <p className="max-w-xl text-sm leading-relaxed text-zinc-400 sm:text-base">
-            Audits every discovered Supabase RLS policy against common tenant-isolation failure
-            patterns. Complex policies are clearly marked for semantic or manual review, and one
-            confirmed finding can be proven live against an isolated demonstration database.
+            Vibe Fixer helps developers who build quickly with AI catch common Supabase security
+            mistakes before users do. It scans Supabase migrations for common access-control
+            failures and, in an authorised environment, can prove, repair and retest one confirmed
+            finding.
           </p>
         </header>
 

@@ -227,4 +227,34 @@ describe("SecurityDemoPanel", () => {
     expect(screen.queryByText(/before: 4 total/i)).toBeNull();
     expect(screen.queryByText(/after: 2 total/i)).toBeNull();
   });
+
+  it("reports real live evidence to onLiveEvidence as soon as the initial check resolves", async () => {
+    mockFetch({ liveState: [VULNERABLE_STATE] });
+    const onLiveEvidence = vi.fn();
+
+    render(
+      <SecurityDemoPanel repositoryUrl={REPO_URL} refreshToken={1} sourceState="finding_present" onLiveEvidence={onLiveEvidence} />,
+    );
+
+    await screen.findByText(/live database vulnerable/i);
+    expect(onLiveEvidence).toHaveBeenCalledWith({ totalRowsReturned: 4, ownRowCount: 2, leakedRowCount: 2 });
+  });
+
+  it("reports updated live evidence to onLiveEvidence after a real reset", async () => {
+    mockFetch({
+      liveState: [PROTECTED_STATE, VULNERABLE_STATE],
+      reset: [RESET_SUCCESS],
+    });
+    const onLiveEvidence = vi.fn();
+
+    render(
+      <SecurityDemoPanel repositoryUrl={REPO_URL} refreshToken={1} sourceState="finding_present" onLiveEvidence={onLiveEvidence} />,
+    );
+
+    const resetButton = await screen.findByRole("button", { name: /reset vulnerable demo/i });
+    fireEvent.click(resetButton);
+
+    await screen.findByText(/live database vulnerable/i);
+    expect(onLiveEvidence).toHaveBeenLastCalledWith({ totalRowsReturned: 4, ownRowCount: 2, leakedRowCount: 2 });
+  });
 });

@@ -18,6 +18,12 @@ export function looksLikeTenantScopingPattern(expression: string): boolean {
   if (!referencesIdentity) return false;
 
   // Require some kind of comparison so we don't treat e.g. a comment-only
-  // reference or a bare function call as a scoping check.
-  return /[=<>]|\bin\b/.test(normalised);
+  // reference or a bare function call as a scoping check. JSON path
+  // operators (->, ->>) are stripped first since they contain ">" but are
+  // not themselves a comparison — without this, any auth.jwt() path
+  // expression (e.g. reaching into user-editable metadata) would look like
+  // a comparison purely because of the arrow operator, even with no real
+  // comparison anywhere in the expression.
+  const withoutJsonPathOperators = normalised.replace(/->>?/g, " ");
+  return /[=<>]|\bin\b/.test(withoutJsonPathOperators);
 }

@@ -1,5 +1,7 @@
 import { splitSqlStatements } from "./discover-statements";
+import { parseFunctionStatement, type ParsedFunction } from "./parse-function";
 import { parsePolicyStatement, type ParsedPolicy } from "./parse-policy";
+import { parseViewStatement, type ParsedView } from "./parse-view";
 import { lineNumberAt } from "./source-location";
 import type { ScannedFile } from "../scanner/types";
 
@@ -20,9 +22,11 @@ export type TableInventoryEntry = {
 
 export type SchemaInventory = {
   tables: Map<string, TableInventoryEntry>;
-  /** Every CREATE/ALTER/DROP POLICY and CREATE/ALTER TABLE statement classified across all scanned files. */
+  /** Every CREATE/ALTER/DROP POLICY, CREATE/ALTER TABLE, and CREATE FUNCTION/VIEW statement classified across all scanned files. */
   statementsInspected: number;
   policiesInspected: number;
+  functions: ParsedFunction[];
+  views: ParsedView[];
 };
 
 const CREATE_TABLE_NAME_RE = /^create\s+table\s+(?:if\s+not\s+exists\s+)?"?([A-Za-z0-9_."]+)"?/i;
@@ -52,6 +56,8 @@ function getOrCreateTable(tables: Map<string, TableInventoryEntry>, rawName: str
  */
 export function buildSchemaInventory(files: ScannedFile[]): SchemaInventory {
   const tables = new Map<string, TableInventoryEntry>();
+  const functions: ParsedFunction[] = [];
+  const views: ParsedView[] = [];
   let statementsInspected = 0;
   let policiesInspected = 0;
 
@@ -107,9 +113,15 @@ export function buildSchemaInventory(files: ScannedFile[]): SchemaInventory {
           // altering a policy's USING/WITH CHECK is not parsed separately
           // in this milestone.
           break;
+        case "CREATE_FUNCTION":
+          functions.push(parseFunctionStatement(statement, file.content, file.path));
+          break;
+        case "CREATE_VIEW":
+          views.push(parseViewStatement(statement, file.content, file.path));
+          break;
       }
     }
   }
 
-  return { tables, statementsInspected, policiesInspected };
+  return { tables, statementsInspected, policiesInspected, functions, views };
 }
