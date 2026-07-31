@@ -11,12 +11,18 @@ export function RepositoryScanner() {
   const [isScanning, setIsScanning] = useState(false);
   const [result, setResult] = useState<ScanResultState | null>(null);
   const scanInFlight = useRef(false);
+  // Incremented on every scan submission (even of the same URL) so
+  // downstream live-state checks always re-derive from a fresh server
+  // check on rescan instead of reusing a result carried over from before.
+  const scanTokenRef = useRef(0);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (scanInFlight.current) return;
     scanInFlight.current = true;
+    scanTokenRef.current += 1;
+    const scanToken = scanTokenRef.current;
 
     const submittedUrl = repositoryUrl;
     setIsScanning(true);
@@ -42,6 +48,7 @@ export function RepositoryScanner() {
           findings: data.findings,
           coverage: data.coverage,
           durationMs: data.durationMs,
+          scanToken,
         });
       }
     } catch {
