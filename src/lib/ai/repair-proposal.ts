@@ -7,13 +7,19 @@ import {
   isTrustedRepairExpression,
 } from "../repair/trusted-repair";
 
+export const REPAIR_PROVIDER = "Google Gemini";
+
+export type RepairConfidence = "high" | "medium" | "low";
+
 const RESPONSE_SCHEMA = {
   type: "object",
   properties: {
     explanation: { type: "string" },
     proposedExpression: { type: "string" },
+    confidence: { type: "string", enum: ["high", "medium", "low"] },
+    assumptions: { type: "string" },
   },
-  required: ["explanation", "proposedExpression"],
+  required: ["explanation", "proposedExpression", "confidence", "assumptions"],
   additionalProperties: false,
 } as const;
 
@@ -26,9 +32,13 @@ export type RepairProposalInput = {
 export type RepairProposalResult =
   | {
       performed: true;
+      provider: string;
       model: string;
+      durationMs: number;
       explanation: string;
       proposedExpression: string;
+      confidence: RepairConfidence;
+      assumptions: string;
       /** Whether the backend's strict validator accepted proposedExpression as the one trusted repair for this table. */
       valid: boolean;
     }
@@ -49,7 +59,11 @@ Owner column on this table: ${REPAIR_TARGET_OWNER_COLUMN} (references auth.users
 
 ${evidence}
 
-Propose a corrected USING expression that restricts each row to the trainer who owns it, using Supabase's standard auth.uid() pattern compared against the ${REPAIR_TARGET_OWNER_COLUMN} column. Respond with only the corrected boolean SQL expression itself (no "USING", no semicolon, no surrounding parentheses) and a short (2-3 sentence) explanation of why the current expression is unsafe and why your proposed expression fixes it.`;
+Propose a corrected USING expression that restricts each row to the trainer who owns it, using Supabase's standard auth.uid() pattern compared against the ${REPAIR_TARGET_OWNER_COLUMN} column. Respond with:
+- explanation: a short (2-3 sentence) explanation of why the current expression is unsafe and why your proposed expression fixes it.
+- proposedExpression: only the corrected boolean SQL expression itself (no "USING", no semicolon, no surrounding parentheses).
+- confidence: "high", "medium", or "low" — how confident you are that this expression is both correct and sufficient given only the information provided.
+- assumptions: one sentence stating what you had to assume about the schema or access model that you could not verify from the information given (for example, that trainer_id is never null, or that trainers should never see each other's rows under any legitimate use case).`;
 }
 
 /**
@@ -65,19 +79,30 @@ Propose a corrected USING expression that restricts each row to the trainer who 
  * REPAIR_SQL constant, never from this response.
  */
 export async function proposeRepair(input: RepairProposalInput): Promise<RepairProposalResult> {
-  const outcome = await generateStructuredJson<{ explanation: string; proposedExpression: string }>({
+  const outcome = await generateStructuredJson<{
+    explanation: string;
+    proposedExpression: string;
+    confidence: RepairConfidence;
+    assumptions: string;
+  }>({
     prompt: buildPrompt(input),
     schema: RESPONSE_SCHEMA,
-    maxOutputTokens: 400,
+    // Uses generateStructuredJson's default budget — see the comment there
+    // on why a small explicit budget reliably cuts this model's replies
+    // off with finishReason "MAX_TOKENS" before any JSON is emitted.
   });
 
   if (!outcome.performed) return { performed: false };
 
   return {
     performed: true,
+    provider: REPAIR_PROVIDER,
     model: outcome.model,
+    durationMs: outcome.durationMs,
     explanation: outcome.data.explanation,
     proposedExpression: outcome.data.proposedExpression,
+    confidence: outcome.data.confidence,
+    assumptions: outcome.data.assumptions,
     valid: isTrustedRepairExpression(outcome.data.proposedExpression),
   };
 }

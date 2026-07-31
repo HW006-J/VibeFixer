@@ -160,15 +160,33 @@ export function RepairFlowPanel({ repositoryUrl }: { repositoryUrl: string }) {
             </p>
           ) : propose.data.aiPerformed ? (
             <div>
-              <p>
-                <span className="font-mono">{propose.data.model}</span> analysed{" "}
-                {propose.data.leakedRowCount} real leaked row(s) just re-confirmed live and
-                proposed:
+              <p className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-sky-300/70">
+                <span>
+                  Provider: <span className="font-mono text-sky-200">{propose.data.provider}</span>
+                </span>
+                <span>
+                  Model: <span className="font-mono text-sky-200">{propose.data.model}</span>
+                </span>
+                <span>
+                  Duration: <span className="font-mono text-sky-200">{propose.data.durationMs}ms</span>
+                </span>
+                <span>
+                  Confidence: <span className="font-mono text-sky-200">{propose.data.confidence}</span>
+                </span>
+              </p>
+              <p className="mt-2">
+                Analysed {propose.data.leakedRowCount} real leaked row(s) just re-confirmed live
+                and proposed:
               </p>
               <pre className="mt-1 overflow-x-auto rounded-md bg-black/40 p-3 text-xs text-sky-100">
                 <code>{propose.data.proposedExpression}</code>
               </pre>
               <p className="mt-2">{propose.data.explanation}</p>
+              {propose.data.assumptions && (
+                <p className="mt-2 text-xs text-sky-300/70">
+                  Stated assumption: {propose.data.assumptions}
+                </p>
+              )}
               <p
                 className={`mt-2 text-xs font-semibold uppercase tracking-wide ${
                   propose.data.valid ? "text-emerald-300" : "text-amber-300"

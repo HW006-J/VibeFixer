@@ -1,9 +1,19 @@
 import { getGeminiClient, getGeminiModel } from "./gemini-client";
 
-const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_TIMEOUT_MS = 20_000;
+/**
+ * Current Gemini flash models think by default and cannot fully disable it
+ * (thinkingBudget: 0 returns 400 INVALID_ARGUMENT on this model) — thinking
+ * tokens are drawn from the same maxOutputTokens budget as the visible
+ * response. Observed live: ~100-500 thinking tokens for a short structured
+ * reply. A low budget (e.g. 400-500) reliably cuts the response off with
+ * finishReason "MAX_TOKENS" before any JSON is emitted. 2048 leaves solid
+ * headroom without being wasteful for these short schemas.
+ */
+const DEFAULT_MAX_OUTPUT_TOKENS = 2048;
 
 export type StructuredGenerationOutcome<T> =
-  | { performed: true; data: T; model: string }
+  | { performed: true; data: T; model: string; durationMs: number }
   | { performed: false };
 
 /**
@@ -25,6 +35,7 @@ export async function generateStructuredJson<T>(options: {
 
   const model = getGeminiModel();
 
+  const startedAt = Date.now();
   try {
     const response = await client.models.generateContent({
       model,
@@ -32,10 +43,11 @@ export async function generateStructuredJson<T>(options: {
       config: {
         responseMimeType: "application/json",
         responseJsonSchema: options.schema,
-        maxOutputTokens: options.maxOutputTokens,
+        maxOutputTokens: options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
         httpOptions: { timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS },
       },
     });
+    const durationMs = Date.now() - startedAt;
 
     const finishReason = response.candidates?.[0]?.finishReason;
     if (finishReason && finishReason !== "STOP") {
@@ -48,7 +60,7 @@ export async function generateStructuredJson<T>(options: {
     if (!text) return { performed: false };
 
     const data = JSON.parse(text) as T;
-    return { performed: true, data, model };
+    return { performed: true, data, model, durationMs };
   } catch {
     return { performed: false };
   }

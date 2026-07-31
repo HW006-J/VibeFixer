@@ -1,10 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
 
 /**
- * Free-tier-compatible default. Overridable via GEMINI_MODEL so the demo
- * keeps working if Google renames or retires this specific model id.
+ * Free-tier-compatible default. `gemini-flash-latest` is a Google-maintained
+ * alias that always resolves to the current recommended flash model, so it
+ * doesn't go stale the way a pinned version does — confirmed live: as of
+ * this writing it resolves to gemini-3.6-flash, while the previously pinned
+ * gemini-2.5-flash returns 404 "no longer available to new users" despite
+ * still being listed by the models API. Overridable via GEMINI_MODEL.
  */
-const DEFAULT_MODEL = "gemini-2.5-flash";
+const DEFAULT_MODEL = "gemini-flash-latest";
 
 let cachedClient: GoogleGenAI | null = null;
 

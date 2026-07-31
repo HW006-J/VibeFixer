@@ -57,7 +57,9 @@ export async function reviewPolicyClauseSemantically(
   }>({
     prompt: buildPrompt(input),
     schema: RESPONSE_SCHEMA,
-    maxOutputTokens: 500,
+    // Uses generateStructuredJson's default budget — current Gemini models
+    // spend a variable number of tokens on internal "thinking" before the
+    // visible JSON reply, drawn from the same budget (see generate-structured.ts).
   });
 
   if (!outcome.performed) return { performed: false };

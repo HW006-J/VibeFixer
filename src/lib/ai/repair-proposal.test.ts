@@ -19,26 +19,47 @@ describe("proposeRepair", () => {
     expect(result).toEqual({ performed: false });
   });
 
-  it("marks a correct proposal as valid via the strict backend validator", async () => {
+  it("marks a correct proposal as valid via the strict backend validator and passes through real provider/model/duration/confidence/assumptions", async () => {
     const { generateStructuredJson } = await import("./generate-structured");
     vi.mocked(generateStructuredJson).mockResolvedValue({
       performed: true,
-      model: "gemini-2.5-flash",
-      data: { explanation: "The current policy allows any authenticated user to read every row.", proposedExpression: "auth.uid() = trainer_id" },
+      model: "gemini-flash-latest",
+      durationMs: 1234,
+      data: {
+        explanation: "The current policy allows any authenticated user to read every row.",
+        proposedExpression: "auth.uid() = trainer_id",
+        confidence: "high",
+        assumptions: "Assumes trainer_id is never null.",
+      },
     });
 
     const { proposeRepair } = await import("./repair-proposal");
     const result = await proposeRepair({ currentExpression: "true", leakedRowCount: 2, sampleLeakedRowSummary: "Victor Brown" });
 
-    expect(result).toMatchObject({ performed: true, valid: true, proposedExpression: "auth.uid() = trainer_id" });
+    expect(result).toMatchObject({
+      performed: true,
+      provider: "Google Gemini",
+      model: "gemini-flash-latest",
+      durationMs: 1234,
+      valid: true,
+      proposedExpression: "auth.uid() = trainer_id",
+      confidence: "high",
+      assumptions: "Assumes trainer_id is never null.",
+    });
   });
 
   it("marks an incorrect or hallucinated proposal as invalid rather than silently accepting it", async () => {
     const { generateStructuredJson } = await import("./generate-structured");
     vi.mocked(generateStructuredJson).mockResolvedValue({
       performed: true,
-      model: "gemini-2.5-flash",
-      data: { explanation: "...", proposedExpression: "owner = current_user" },
+      model: "gemini-flash-latest",
+      durationMs: 900,
+      data: {
+        explanation: "...",
+        proposedExpression: "owner = current_user",
+        confidence: "low",
+        assumptions: "Assumed an 'owner' column exists.",
+      },
     });
 
     const { proposeRepair } = await import("./repair-proposal");

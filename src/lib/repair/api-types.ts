@@ -21,9 +21,14 @@ export type RepairProposeSuccessResponse = {
   alreadyRepaired: boolean;
   /** True only when a real Gemini call actually completed successfully. */
   aiPerformed: boolean;
+  provider: string | null;
   model: string | null;
+  /** Real wall-clock time of the model call, in milliseconds. */
+  durationMs: number | null;
   explanation: string | null;
   proposedExpression: string | null;
+  confidence: "high" | "medium" | "low" | null;
+  assumptions: string | null;
   /** Whether the backend's strict validator accepted the proposal as the one trusted repair for this table. */
   valid: boolean;
   /** The exact expression that will be applied if a human approves — always this fixed value, never the AI's raw text. */

@@ -37,7 +37,11 @@ describe("generateStructuredJson", () => {
     const { generateStructuredJson } = await import("./generate-structured");
     const result = await generateStructuredJson<{ ok: boolean }>({ prompt: "hi", schema: {} });
 
-    expect(result).toEqual({ performed: true, data: { ok: true }, model: "gemini-2.5-flash" });
+    expect(result).toMatchObject({ performed: true, data: { ok: true }, model: "gemini-2.5-flash" });
+    if (result.performed) {
+      expect(typeof result.durationMs).toBe("number");
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    }
   });
 
   it("treats a non-STOP finish reason (e.g. safety block) as not performed", async () => {
