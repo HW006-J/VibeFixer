@@ -78,6 +78,8 @@ export async function POST(request: Request) {
     );
   }
 
+  const startedAt = Date.now();
+
   try {
     const filesResult = await fetchSupabaseFiles(parsed.repository, process.env.GITHUB_TOKEN);
 
@@ -90,13 +92,15 @@ export async function POST(request: Request) {
     }
 
     const repositoryLabel = `${parsed.repository.owner}/${parsed.repository.repo}`;
-    const findings = scanRlsPolicies(repositoryLabel, filesResult.files);
+    const { findings, policiesInspected } = scanRlsPolicies(repositoryLabel, filesResult.files);
 
     const responseBody: ScanSuccessResponse = {
       ok: true,
       repository: repositoryLabel,
       filesScanned: filesResult.files.map((file) => file.path),
+      policiesInspected,
       findings,
+      durationMs: Date.now() - startedAt,
     };
 
     return NextResponse.json(responseBody, { status: 200 });

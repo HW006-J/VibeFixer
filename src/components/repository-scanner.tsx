@@ -1,41 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { ScanApiResponse } from "@/lib/scanner/api-types";
 import { ScanResult, type ScanResultState } from "./scan-result";
 
 const AUTHORISED_REPOSITORY_URL = "https://github.com/HW006-J/rls-red-alert-demo-target";
 
-const STAGES = [
-  "Validating repository",
-  "Locating Supabase migrations",
-  "Inspecting RLS policies",
-  "Producing findings",
-] as const;
-
-const STAGE_INTERVAL_MS = 550;
-const MIN_PROGRESS_DISPLAY_MS = STAGE_INTERVAL_MS * STAGES.length;
-
-function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export function RepositoryScanner() {
   const [repositoryUrl, setRepositoryUrl] = useState(AUTHORISED_REPOSITORY_URL);
   const [isScanning, setIsScanning] = useState(false);
-  const [stageIndex, setStageIndex] = useState(0);
   const [result, setResult] = useState<ScanResultState | null>(null);
   const scanInFlight = useRef(false);
-
-  useEffect(() => {
-    if (!isScanning) return;
-
-    const interval = setInterval(() => {
-      setStageIndex((current) => Math.min(current + 1, STAGES.length - 1));
-    }, STAGE_INTERVAL_MS);
-
-    return () => clearInterval(interval);
-  }, [isScanning]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -44,10 +19,7 @@ export function RepositoryScanner() {
     scanInFlight.current = true;
 
     setIsScanning(true);
-    setStageIndex(0);
     setResult(null);
-
-    const startedAt = Date.now();
 
     try {
       const response = await fetch("/api/scan", {
@@ -58,14 +30,6 @@ export function RepositoryScanner() {
 
       const data = (await response.json()) as ScanApiResponse;
 
-      // Real network latency can beat the staged-progress animation, which
-      // would otherwise cut the demo's progress reveal short. Hold the
-      // result until the stages have had time to visibly play out.
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < MIN_PROGRESS_DISPLAY_MS) {
-        await wait(MIN_PROGRESS_DISPLAY_MS - elapsed);
-      }
-
       if (!data.ok) {
         setResult({ status: "error", error: data.error });
       } else {
@@ -73,7 +37,9 @@ export function RepositoryScanner() {
           status: "success",
           repository: data.repository,
           filesScanned: data.filesScanned,
+          policiesInspected: data.policiesInspected,
           findings: data.findings,
+          durationMs: data.durationMs,
         });
       }
     } catch {
@@ -117,6 +83,7 @@ export function RepositoryScanner() {
         <button
           type="submit"
           disabled={isScanning}
+          aria-busy={isScanning}
           className="inline-flex h-[42px] items-center justify-center rounded-md bg-red-600 px-6 text-sm font-semibold text-white transition-colors hover:bg-red-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isScanning ? "Scanning…" : "Scan repository"}
@@ -125,24 +92,13 @@ export function RepositoryScanner() {
 
       <div aria-live="polite" className="flex flex-col gap-6">
         {isScanning && (
-          <ol className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
-            {STAGES.map((stage, index) => (
-              <li
-                key={stage}
-                className={`flex items-center gap-2 text-sm transition-colors ${
-                  index <= stageIndex ? "text-zinc-100" : "text-zinc-600"
-                }`}
-              >
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    index <= stageIndex ? "bg-red-500" : "bg-zinc-700"
-                  }`}
-                />
-                {stage}
-                {index === stageIndex ? "…" : ""}
-              </li>
-            ))}
-          </ol>
+          <div className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-300">
+            <span
+              aria-hidden="true"
+              className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-600 border-t-red-500"
+            />
+            Scanning repository…
+          </div>
         )}
 
         {!isScanning && result && <ScanResult state={result} />}

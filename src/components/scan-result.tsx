@@ -5,7 +5,9 @@ type SuccessState = {
   status: "success";
   repository: string;
   filesScanned: string[];
+  policiesInspected: number;
   findings: RlsFinding[];
+  durationMs: number;
 };
 
 type ErrorState = {
@@ -14,6 +16,45 @@ type ErrorState = {
 };
 
 export type ScanResultState = SuccessState | ErrorState;
+
+function pluralise(count: number, singular: string, plural: string): string {
+  return count === 1 ? singular : plural;
+}
+
+/**
+ * A checklist of facts already confirmed by the real server response.
+ * Each item fades in with a small staggered delay for a polished demo
+ * feel, but every value shown was already known before the animation
+ * started — nothing here represents a live or simulated backend stage.
+ */
+function PipelineFacts({ state }: { state: SuccessState }) {
+  const { repository, filesScanned, policiesInspected, findings, durationMs } = state;
+
+  const facts = [
+    `Repository authorised: ${repository}`,
+    `${filesScanned.length} SQL ${pluralise(filesScanned.length, "file", "files")} fetched from GitHub`,
+    `${policiesInspected} RLS ${pluralise(policiesInspected, "policy", "policies")} inspected`,
+    findings.length > 0
+      ? `${findings.length} critical ${pluralise(findings.length, "finding", "findings")} discovered`
+      : "No allow-all findings discovered",
+    `Completed in ${durationMs}ms`,
+  ];
+
+  return (
+    <ul className="flex flex-col gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-300">
+      {facts.map((fact, index) => (
+        <li
+          key={fact}
+          className="flex items-center gap-2"
+          style={{ animation: "fact-reveal 300ms ease-out both", animationDelay: `${index * 60}ms` }}
+        >
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
+          {fact}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function FindingCard({ finding }: { finding: RlsFinding }) {
   return (
@@ -86,36 +127,43 @@ export function ScanResult({ state }: { state: ScanResultState }) {
 
   if (filesScanned.length === 0) {
     return (
-      <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-5 text-zinc-200">
-        <p className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
-          No migrations found
-        </p>
-        <p className="mt-2 text-sm leading-relaxed">
-          No files under <code className="font-mono">supabase/migrations/</code> or a{" "}
-          <code className="font-mono">supabase/schema.sql</code> were found in{" "}
-          <span className="font-mono">{repository}</span>.
-        </p>
+      <div className="flex flex-col gap-4">
+        <PipelineFacts state={state} />
+        <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-5 text-zinc-200">
+          <p className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
+            No migrations found
+          </p>
+          <p className="mt-2 text-sm leading-relaxed">
+            No files under <code className="font-mono">supabase/migrations/</code> or a{" "}
+            <code className="font-mono">supabase/schema.sql</code> were found in{" "}
+            <span className="font-mono">{repository}</span>.
+          </p>
+        </div>
       </div>
     );
   }
 
   if (findings.length === 0) {
     return (
-      <div className="rounded-lg border border-emerald-600/50 bg-emerald-950/30 p-5 text-emerald-100">
-        <p className="text-sm font-semibold uppercase tracking-wide text-emerald-300">
-          No allow-all policies detected
-        </p>
-        <p className="mt-2 text-sm leading-relaxed">
-          Scanned {filesScanned.length} file{filesScanned.length === 1 ? "" : "s"} in{" "}
-          <span className="font-mono">{repository}</span> and found no{" "}
-          <code className="font-mono">USING (true)</code> policies.
-        </p>
+      <div className="flex flex-col gap-4">
+        <PipelineFacts state={state} />
+        <div className="rounded-lg border border-emerald-600/50 bg-emerald-950/30 p-5 text-emerald-100">
+          <p className="text-sm font-semibold uppercase tracking-wide text-emerald-300">
+            No allow-all policies detected
+          </p>
+          <p className="mt-2 text-sm leading-relaxed">
+            Scanned {filesScanned.length} file{filesScanned.length === 1 ? "" : "s"} in{" "}
+            <span className="font-mono">{repository}</span> and found no{" "}
+            <code className="font-mono">USING (true)</code> policies.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-4">
+      <PipelineFacts state={state} />
       {findings.map((finding) => (
         <FindingCard key={finding.id} finding={finding} />
       ))}

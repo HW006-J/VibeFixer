@@ -8,7 +8,9 @@ export type ScanSuccessResponse = {
   ok: true;
   repository: string;
   filesScanned: string[];
+  policiesInspected: number;
   findings: RlsFinding[];
+  durationMs: number;
 };
 
 export type ScanErrorResponse = {

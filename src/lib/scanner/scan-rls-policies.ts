@@ -73,6 +73,12 @@ function extractRole(statement: string): string | null {
   return raw.length > 0 ? raw : null;
 }
 
+export type ScanRlsPoliciesResult = {
+  findings: RlsFinding[];
+  /** Total CREATE POLICY statements the scanner actually parsed, across all files, regardless of outcome. */
+  policiesInspected: number;
+};
+
 /**
  * Deterministically scans SQL migration/schema files for RLS policies
  * whose USING clause is the literal allow-all expression `true`. Only
@@ -80,8 +86,9 @@ function extractRole(statement: string): string | null {
  * evaluated, so unrelated occurrences of the word "true" elsewhere in
  * the file (column defaults, comments, other expressions) are ignored.
  */
-export function scanRlsPolicies(repository: string, files: ScannedFile[]): RlsFinding[] {
+export function scanRlsPolicies(repository: string, files: ScannedFile[]): ScanRlsPoliciesResult {
   const findings: RlsFinding[] = [];
+  let policiesInspected = 0;
 
   for (const file of files) {
     CREATE_POLICY_STATEMENT.lastIndex = 0;
@@ -90,6 +97,7 @@ export function scanRlsPolicies(repository: string, files: ScannedFile[]): RlsFi
     while ((match = CREATE_POLICY_STATEMENT.exec(file.content)) !== null) {
       const statement = match[0];
       const statementStart = match.index;
+      policiesInspected += 1;
 
       const using = extractUsingClause(statement);
       if (!using || !isAllowAllExpression(using.expression)) {
@@ -125,5 +133,5 @@ export function scanRlsPolicies(repository: string, files: ScannedFile[]): RlsFi
     }
   }
 
-  return findings;
+  return { findings, policiesInspected };
 }

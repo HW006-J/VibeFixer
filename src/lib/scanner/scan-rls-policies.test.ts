@@ -29,8 +29,9 @@ describe("scanRlsPolicies", () => {
       "  USING (true);",
     ]);
 
-    const findings = scanRlsPolicies(REPOSITORY, [file]);
+    const { findings, policiesInspected } = scanRlsPolicies(REPOSITORY, [file]);
 
+    expect(policiesInspected).toBe(2);
     expect(findings).toHaveLength(1);
     const [finding] = findings;
     expect(finding.ruleId).toBe("RLS_ALLOW_ALL");
@@ -44,7 +45,7 @@ describe("scanRlsPolicies", () => {
     expect(finding.evidence).toContain("USING (true)");
   });
 
-  it("does not flag unrelated occurrences of the word true", () => {
+  it("does not flag unrelated occurrences of the word true, but still counts both policies as inspected", () => {
     const file = fixtureFile("supabase/migrations/0002_settings.sql", [
       "ALTER TABLE public.settings ADD COLUMN enabled boolean DEFAULT true;",
       "-- comment saying this is true and fine",
@@ -59,17 +60,20 @@ describe("scanRlsPolicies", () => {
       "  USING (is_admin = true);",
     ]);
 
-    const findings = scanRlsPolicies(REPOSITORY, [file]);
+    const { findings, policiesInspected } = scanRlsPolicies(REPOSITORY, [file]);
 
     expect(findings).toHaveLength(0);
+    expect(policiesInspected).toBe(2);
   });
 
-  it("returns no findings for files with no CREATE POLICY statements", () => {
+  it("returns no findings and zero policies inspected for files with no CREATE POLICY statements", () => {
     const file = fixtureFile("supabase/schema.sql", [
       "CREATE TABLE public.profiles (id uuid primary key, user_id uuid not null);",
     ]);
 
-    expect(scanRlsPolicies(REPOSITORY, [file])).toHaveLength(0);
+    const { findings, policiesInspected } = scanRlsPolicies(REPOSITORY, [file]);
+    expect(findings).toHaveLength(0);
+    expect(policiesInspected).toBe(0);
   });
 
   it("extracts the table from a quoted policy name containing spaces", () => {
@@ -81,7 +85,8 @@ describe("scanRlsPolicies", () => {
       "using (true);",
     ]);
 
-    const findings = scanRlsPolicies(REPOSITORY, [file]);
+    const { findings, policiesInspected } = scanRlsPolicies(REPOSITORY, [file]);
+    expect(policiesInspected).toBe(1);
     expect(findings).toHaveLength(1);
     expect(findings[0].table).toBe("public.clients");
     expect(findings[0].operation).toBe("SELECT");
@@ -96,8 +101,23 @@ describe("scanRlsPolicies", () => {
       "  USING ((( true )));",
     ]);
 
-    const findings = scanRlsPolicies(REPOSITORY, [file]);
+    const { findings, policiesInspected } = scanRlsPolicies(REPOSITORY, [file]);
+    expect(policiesInspected).toBe(1);
     expect(findings).toHaveLength(1);
     expect(findings[0].table).toBe("public.orders");
+  });
+
+  it("counts policies inspected across multiple files", () => {
+    const fileA = fixtureFile("supabase/migrations/0001.sql", [
+      'CREATE POLICY "a" ON public.a FOR SELECT TO authenticated USING (owner_id = auth.uid());',
+    ]);
+    const fileB = fixtureFile("supabase/migrations/0002.sql", [
+      'CREATE POLICY "b" ON public.b FOR SELECT TO public USING (true);',
+      'CREATE POLICY "c" ON public.c FOR ALL TO public USING (true);',
+    ]);
+
+    const { findings, policiesInspected } = scanRlsPolicies(REPOSITORY, [fileA, fileB]);
+    expect(policiesInspected).toBe(3);
+    expect(findings).toHaveLength(2);
   });
 });
