@@ -8,6 +8,9 @@ export type GithubFetchErrorCode =
   | "TIMEOUT"
   | "MALFORMED_RESPONSE"
   | "TREE_TRUNCATED"
+  | "TOO_MANY_FILES"
+  | "FILE_TOO_LARGE"
+  | "TOTAL_SIZE_EXCEEDED"
   | "UNKNOWN";
 
 export type FetchSupabaseFilesResult =
@@ -19,6 +22,12 @@ const REQUEST_TIMEOUT_MS = 10_000;
 
 const SUPABASE_MIGRATION_PATH = /^supabase\/migrations\/[^/]+\.sql$/;
 const SUPABASE_SCHEMA_PATH = "supabase/schema.sql";
+
+// Deterministic resource limits so a public deployment cannot be forced to
+// process arbitrarily large repositories.
+const MAX_PERMITTED_FILES = 50;
+const MAX_FILE_SIZE_BYTES = 200 * 1024; // 200 KB
+const MAX_TOTAL_SIZE_BYTES = 1024 * 1024; // 1 MB
 
 function isPermittedPath(path: string): boolean {
   return SUPABASE_MIGRATION_PATH.test(path) || path === SUPABASE_SCHEMA_PATH;
@@ -46,7 +55,12 @@ async function githubRequest(
     });
 
     if (response.status === 404) {
-      return { ok: false, error: "NOT_FOUND", message: "Repository or resource not found." };
+      return {
+        ok: false,
+        error: "NOT_FOUND",
+        message:
+          "Repository not found. It may be private, misspelled, or deleted — only public repositories can be scanned.",
+      };
     }
 
     if (
@@ -87,7 +101,7 @@ async function githubRequest(
 }
 
 type RepoInfo = { default_branch?: unknown };
-type TreeEntry = { path?: unknown; type?: unknown };
+type TreeEntry = { path?: unknown; type?: unknown; size?: unknown };
 type TreeResponse = { tree?: unknown; truncated?: unknown };
 type ContentsResponse = { content?: unknown; encoding?: unknown };
 
@@ -132,14 +146,32 @@ export async function fetchSupabaseFiles(
     };
   }
 
-  const permittedPaths = (treeData.tree as TreeEntry[])
-    .filter((entry) => entry.type === "blob" && typeof entry.path === "string")
-    .map((entry) => entry.path as string)
-    .filter(isPermittedPath);
+  const permittedEntries = (treeData.tree as TreeEntry[]).filter(
+    (entry) => entry.type === "blob" && typeof entry.path === "string" && isPermittedPath(entry.path),
+  );
+
+  if (permittedEntries.length > MAX_PERMITTED_FILES) {
+    return {
+      ok: false,
+      error: "TOO_MANY_FILES",
+      message: `This repository has ${permittedEntries.length} permitted SQL files, which exceeds the maximum of ${MAX_PERMITTED_FILES} files this scanner will process.`,
+    };
+  }
 
   const files: ScannedFile[] = [];
+  let totalBytes = 0;
 
-  for (const path of permittedPaths) {
+  for (const entry of permittedEntries) {
+    const path = entry.path as string;
+
+    if (typeof entry.size === "number" && entry.size > MAX_FILE_SIZE_BYTES) {
+      return {
+        ok: false,
+        error: "FILE_TOO_LARGE",
+        message: `"${path}" is ${entry.size} bytes, which exceeds the maximum of ${MAX_FILE_SIZE_BYTES} bytes (200 KB) per file.`,
+      };
+    }
+
     const encodedPath = path.split("/").map(encodeURIComponent).join("/");
     const contentsResult = await githubRequest(
       `/repos/${owner}/${repo}/contents/${encodedPath}?ref=${encodeURIComponent(defaultBranch)}`,
@@ -149,13 +181,33 @@ export async function fetchSupabaseFiles(
 
     const contentsData = contentsResult.data as ContentsResponse;
     if (contentsData.encoding !== "base64" || typeof contentsData.content !== "string") {
-      // Skip individual files GitHub couldn't return inline (e.g. oversized
-      // blobs) rather than failing the whole scan.
-      continue;
+      return {
+        ok: false,
+        error: "MALFORMED_RESPONSE",
+        message: `GitHub did not return readable content for "${path}".`,
+      };
     }
 
-    const decoded = Buffer.from(contentsData.content, "base64").toString("utf-8");
-    files.push({ path, content: decoded });
+    const decodedBuffer = Buffer.from(contentsData.content, "base64");
+
+    if (decodedBuffer.byteLength > MAX_FILE_SIZE_BYTES) {
+      return {
+        ok: false,
+        error: "FILE_TOO_LARGE",
+        message: `"${path}" is ${decodedBuffer.byteLength} bytes, which exceeds the maximum of ${MAX_FILE_SIZE_BYTES} bytes (200 KB) per file.`,
+      };
+    }
+
+    totalBytes += decodedBuffer.byteLength;
+    if (totalBytes > MAX_TOTAL_SIZE_BYTES) {
+      return {
+        ok: false,
+        error: "TOTAL_SIZE_EXCEEDED",
+        message: `The total size of permitted SQL files exceeds the maximum of ${MAX_TOTAL_SIZE_BYTES} bytes (1 MB) this scanner will download.`,
+      };
+    }
+
+    files.push({ path, content: decodedBuffer.toString("utf-8") });
   }
 
   return { ok: true, files };

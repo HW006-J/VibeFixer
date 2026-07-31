@@ -37,6 +37,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local Supabase CLI link state (project ref, pooler URL) — no secrets, but
+# machine-specific and irrelevant to the app; used only by scripts/setup-demo-environment.mjs
+supabase/.temp/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
