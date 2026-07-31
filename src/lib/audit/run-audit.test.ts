@@ -14,7 +14,7 @@ afterEach(() => {
 
 describe("runAudit", () => {
   it("produces a coverage report and passes isDemoRepository through untouched", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "");
 
     const files: ScannedFile[] = [
       file("supabase/migrations/0001.sql", [
@@ -42,7 +42,7 @@ describe("runAudit", () => {
   });
 
   it("does not attempt AI review when no API key is configured, and never fabricates an aiReview", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "");
 
     const files: ScannedFile[] = [
       file("supabase/migrations/0001.sql", [
@@ -60,7 +60,7 @@ describe("runAudit", () => {
   });
 
   it("returns an empty findings list and zero-valued coverage for a repository with no policies", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "");
 
     const report = await runAudit(REPOSITORY, false, []);
 

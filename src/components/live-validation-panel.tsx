@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { LiveValidationApiResponse } from "@/lib/scanner/api-types";
+import { RepairFlowPanel } from "./repair-flow-panel";
 
 type LiveValidationState =
   | { status: "idle" }
@@ -95,6 +96,8 @@ export function LiveValidationPanel({ repositoryUrl }: { repositoryUrl: string }
               No other trainer&apos;s rows were returned in this run.
             </p>
           )}
+
+          {state.data.leakedRowCount > 0 && <RepairFlowPanel repositoryUrl={repositoryUrl} />}
         </div>
       )}
     </div>
