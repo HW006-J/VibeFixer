@@ -33,3 +33,7 @@ A single-page hackathon demonstration that:
 - Review the complete Git diff before committing.
 - Run lint, type checking, tests and production build.
 - The user reviews and merges pull requests.
+
+## LLM Wiki
+
+This project has an LLM-curated wiki at `docs/wiki/` recording the work done. Read `docs/wiki/index.md` before answering questions that rely on knowledge accumulated here. Full conventions in `docs/wiki/SCHEMA.md`. Ingest and query workflows live in the `llm-wiki` skill.
