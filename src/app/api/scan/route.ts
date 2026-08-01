@@ -4,11 +4,8 @@ import {
   parseRepositoryUrl,
   type ParseRepositoryUrlError,
 } from "@/lib/github/parse-repository-url";
-import {
-  fetchSupabaseFiles,
-  type GithubFetchErrorCode,
-} from "@/lib/github/fetch-supabase-files";
-import { runAudit } from "@/lib/audit/run-audit";
+import { fetchScanFiles, type GithubFetchErrorCode } from "@/lib/github/fetch-scan-files";
+import { runUnifiedSecurityScan } from "@/lib/security/run-scan";
 import type { ScanErrorResponse, ScanSuccessResponse } from "@/lib/scanner/api-types";
 
 export const runtime = "nodejs";
@@ -78,7 +75,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const filesResult = await fetchSupabaseFiles(parsed.repository, process.env.GITHUB_TOKEN);
+    const filesResult = await fetchScanFiles(parsed.repository, process.env.GITHUB_TOKEN);
 
     if (!filesResult.ok) {
       return jsonError(
@@ -92,15 +89,17 @@ export async function POST(request: Request) {
     const demoRepository = process.env.DEMO_GITHUB_REPOSITORY;
     const isDemoRepository = Boolean(demoRepository) && isSameRepository(parsed.repository, demoRepository!);
 
-    const report = await runAudit(repositoryLabel, isDemoRepository, filesResult.files);
+    const scan = await runUnifiedSecurityScan(repositoryLabel, isDemoRepository, filesResult.files);
 
     const responseBody: ScanSuccessResponse = {
       ok: true,
-      repository: report.repository,
-      isDemoRepository: report.isDemoRepository,
-      findings: report.findings,
-      coverage: report.coverage,
-      durationMs: report.durationMs,
+      repository: scan.repository,
+      isDemoRepository: scan.isDemoRepository,
+      findings: scan.findings,
+      unifiedFindings: scan.unifiedFindings,
+      securityReport: scan.securityReport,
+      coverage: scan.coverage,
+      durationMs: scan.durationMs,
     };
 
     return NextResponse.json(responseBody, { status: 200 });

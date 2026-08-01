@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { ScanResult, type ScanResultState } from "./scan-result";
 import type { AuditFinding } from "@/lib/audit/types";
+import { auditFindingToUnified } from "@/lib/security/from-audit";
+import { buildSecurityReport } from "@/lib/security/report";
 
 function baseFinding(overrides: Partial<AuditFinding>): AuditFinding {
   return {
@@ -36,12 +38,23 @@ function successState(findings: AuditFinding[], overrides: Partial<Extract<ScanR
   const criticalFindingCount = findings.filter((f) => f.tier === "critical").length;
   const highRiskFindingCount = findings.filter((f) => f.tier === "high").length;
   const needsReviewCount = findings.filter((f) => f.tier === "review").length;
+  const unifiedFindings = findings.map(auditFindingToUnified);
+  const securityReport = buildSecurityReport({
+    repository: "some-owner/some-repo",
+    filesInspected: ["supabase/migrations/0001.sql"],
+    unifiedFindings,
+    checksRun: 28,
+    categoriesAssessed: ["supabase"],
+    unsupportedContext: [],
+  });
   return {
     status: "success",
     repository: "some-owner/some-repo",
     repositoryUrl: "https://github.com/some-owner/some-repo",
     isDemoRepository: false,
     findings,
+    unifiedFindings,
+    securityReport,
     coverage: {
       filesScanned: ["supabase/migrations/0001.sql"],
       statementsInspected: 3,
@@ -119,6 +132,35 @@ describe("ScanResult", () => {
   it("shows the no-issues-flagged message with a summary when the scan found nothing", () => {
     render(<ScanResult state={successState([])} />);
     expect(screen.getByText(/no issues flagged/i)).toBeTruthy();
-    expect(screen.getByText(/no known issues detected/i)).toBeTruthy();
+    expect(screen.getAllByText(/no issue detected by the current vibe fixer rule set/i).length).toBeGreaterThan(0);
+  });
+
+  it("filters findings by category", () => {
+    const audit = baseFinding({ tier: "critical" });
+    const iamFinding = {
+      ...auditFindingToUnified(audit),
+      id: "iam|policy|IAM_ALLOW_WILDCARD_ACTION",
+      category: "iam" as const,
+      ruleId: "IAM_ALLOW_WILDCARD_ACTION",
+      title: "IAM wildcard action",
+    };
+    render(
+      <ScanResult
+        state={successState([audit], {
+          unifiedFindings: [auditFindingToUnified(audit), iamFinding],
+          securityReport: buildSecurityReport({
+            repository: "some-owner/some-repo",
+            filesInspected: ["supabase/migrations/0001.sql", "iam/policy.json"],
+            unifiedFindings: [auditFindingToUnified(audit), iamFinding],
+            checksRun: 28,
+            categoriesAssessed: ["supabase", "iam"],
+            unsupportedContext: [],
+          }),
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: /allow-all rls policy/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /iam wildcard action/i })).toBeTruthy();
   });
 });

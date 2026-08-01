@@ -46,6 +46,8 @@ export function RepositoryScanner() {
           repositoryUrl: submittedUrl,
           isDemoRepository: data.isDemoRepository,
           findings: data.findings,
+          unifiedFindings: data.unifiedFindings,
+          securityReport: data.securityReport,
           coverage: data.coverage,
           durationMs: data.durationMs,
           scanToken,

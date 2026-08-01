@@ -1,4 +1,6 @@
 import type { AuditCoverage, AuditFinding } from "../audit/types";
+import type { UnifiedFinding } from "../security/finding";
+import type { SecurityReport } from "../security/report";
 
 export type ScanRequestBody = {
   repositoryUrl: string;
@@ -10,7 +12,12 @@ export type ScanSuccessResponse = {
   /** True only for the single repository configured in DEMO_GITHUB_REPOSITORY. */
   isDemoRepository: boolean;
   findings: AuditFinding[];
-  coverage: AuditCoverage;
+  unifiedFindings: UnifiedFinding[];
+  securityReport: SecurityReport;
+  coverage: AuditCoverage & {
+    categoriesAssessed?: string[];
+    filesByCategory?: Record<string, string[]>;
+  };
   durationMs: number;
 };
 
