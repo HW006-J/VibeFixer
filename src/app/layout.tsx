@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Vibe Fixer",
-  description: "Security checks for AI-built Supabase applications.",
+  description: "Security checks for AI-built applications.",
 };
 
 export default function RootLayout({

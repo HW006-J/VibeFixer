@@ -18,6 +18,9 @@ describe("runDeterministicRules", () => {
   it("regression: still detects the real demo fixture's USING (true) policy exactly as before", () => {
     const { findings } = audit([
       file("supabase/migrations/001_create_clients.sql", [
+        "-- Deliberately simplified schema for an authorised security demonstration.",
+        "-- Do not deploy this fixture to a real production application.",
+        "",
         "create table public.clients (",
         "  id uuid primary key default gen_random_uuid(),",
         "  trainer_id uuid not null references auth.users(id) on delete cascade",
@@ -46,6 +49,59 @@ describe("runDeterministicRules", () => {
     expect(finding.role).toBe("authenticated");
     expect(finding.line).toBe(8);
     expect(finding.filePath).toBe("supabase/migrations/002_add_vulnerable_clients_policy.sql");
+    // The real demo table's owner column (trainer_id, via its `references
+    // auth.users(id)` foreign key) must be used in the recommendation —
+    // never the generic placeholder — since it was confidently parsed from
+    // this table's own schema.
+    expect(finding.remediation).toContain("auth.uid() = trainer_id");
+    expect(finding.remediation).not.toContain("owner_id");
+  });
+
+  describe("owner-column-aware remediation", () => {
+    it("uses the real schema-parsed owner column in the allow-all remediation when confidently found", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "create table public.orders (",
+          "  id uuid primary key default gen_random_uuid(),",
+          "  customer_id uuid not null references auth.users(id)",
+          ");",
+          "alter table public.orders enable row level security;",
+          'create policy "p" on public.orders for select to authenticated using (true);',
+        ]),
+      ]);
+
+      const finding = findings.find((f) => f.ruleId === "RLS_ALLOW_ALL");
+      expect(finding?.remediation).toContain("auth.uid() = customer_id");
+    });
+
+    it("falls back to the generic owner_id placeholder without inventing a column when no confident owner column is found", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "create table public.notes (id uuid primary key, body text);",
+          "alter table public.notes enable row level security;",
+          'create policy "p" on public.notes for select to authenticated using (true);',
+        ]),
+      ]);
+
+      const finding = findings.find((f) => f.ruleId === "RLS_ALLOW_ALL");
+      expect(finding?.remediation).toContain("auth.uid() = owner_id");
+    });
+
+    it("uses the real schema-parsed owner column in the login-only remediation too", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "create table public.orders (",
+          "  id uuid primary key default gen_random_uuid(),",
+          "  customer_id uuid not null references auth.users(id)",
+          ");",
+          "alter table public.orders enable row level security;",
+          'create policy "p" on public.orders for select to authenticated using (auth.uid() is not null);',
+        ]),
+      ]);
+
+      const finding = findings.find((f) => f.ruleId === "VIBE_LOGIN_ONLY_POLICY");
+      expect(finding?.remediation).toContain("auth.uid() = customer_id");
+    });
   });
 
   it("flags WITH CHECK (true) on an INSERT policy as critical", () => {

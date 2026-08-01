@@ -41,6 +41,7 @@ function protectedTable(): Map<string, TableInventoryEntry> {
     createdAt: { filePath: "supabase/migrations/0000.sql", line: 1 },
     rlsChanges: [],
     policies: [],
+    ownerColumnHint: null,
   });
   return tables;
 }
@@ -112,6 +113,7 @@ describe("evaluateSecurityDefinerViews", () => {
       createdAt: { filePath: "supabase/migrations/0000.sql", line: 1 },
       rlsChanges: [],
       policies: [],
+      ownerColumnHint: null,
     });
     const findings = evaluateSecurityDefinerViews(
       [view({ referencedTables: ["public.public_notices"] })],

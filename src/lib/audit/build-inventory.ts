@@ -1,4 +1,5 @@
-import { splitSqlStatements } from "./discover-statements";
+import { splitSqlStatements, stripLeadingTrivia } from "./discover-statements";
+import { findOwnerColumnHint } from "./find-owner-column";
 import { parseFunctionStatement, type ParsedFunction } from "./parse-function";
 import { parsePolicyStatement, type ParsedPolicy } from "./parse-policy";
 import { parseViewStatement, type ParsedView } from "./parse-view";
@@ -18,6 +19,8 @@ export type TableInventoryEntry = {
   createdAt: { filePath: string; line: number } | null;
   rlsChanges: RlsChange[];
   policies: ParsedPolicy[];
+  /** The column with an inline `references auth.users(...)` foreign key, when confidently parsed from this table's CREATE TABLE statement — real schema evidence, never invented. Null when no such column was found. */
+  ownerColumnHint: string | null;
 };
 
 export type SchemaInventory = {
@@ -41,7 +44,14 @@ function getOrCreateTable(tables: Map<string, TableInventoryEntry>, rawName: str
   const key = normaliseTableName(rawName);
   let entry = tables.get(key);
   if (!entry) {
-    entry = { table: rawName.replace(/"/g, ""), rlsEnabled: false, createdAt: null, rlsChanges: [], policies: [] };
+    entry = {
+      table: rawName.replace(/"/g, ""),
+      rlsEnabled: false,
+      createdAt: null,
+      rlsChanges: [],
+      policies: [],
+      ownerColumnHint: null,
+    };
     tables.set(key, entry);
   }
   return entry;
@@ -72,17 +82,21 @@ export function buildSchemaInventory(files: ScannedFile[]): SchemaInventory {
 
       switch (statement.type) {
         case "CREATE_TABLE": {
-          const match = CREATE_TABLE_NAME_RE.exec(statement.raw);
+          const stripped = stripLeadingTrivia(statement.raw);
+          const match = CREATE_TABLE_NAME_RE.exec(stripped);
           if (!match) break;
           const entry = getOrCreateTable(tables, match[1]);
           if (!entry.createdAt) {
             entry.createdAt = { filePath: file.path, line };
           }
+          if (!entry.ownerColumnHint) {
+            entry.ownerColumnHint = findOwnerColumnHint(stripped);
+          }
           break;
         }
         case "ALTER_TABLE_ENABLE_RLS":
         case "ALTER_TABLE_DISABLE_RLS": {
-          const match = ALTER_TABLE_NAME_RE.exec(statement.raw);
+          const match = ALTER_TABLE_NAME_RE.exec(stripLeadingTrivia(statement.raw));
           if (!match) break;
           const entry = getOrCreateTable(tables, match[1]);
           const enabled = statement.type === "ALTER_TABLE_ENABLE_RLS";
@@ -99,7 +113,7 @@ export function buildSchemaInventory(files: ScannedFile[]): SchemaInventory {
           break;
         }
         case "DROP_POLICY": {
-          const match = DROP_POLICY_TABLE_RE.exec(statement.raw);
+          const match = DROP_POLICY_TABLE_RE.exec(stripLeadingTrivia(statement.raw));
           if (!match) break;
           // Ensure the table is represented in the inventory even if this
           // is the only statement mentioning it; does not remove earlier

@@ -137,7 +137,7 @@ const CREATE_FUNCTION_RE = /^create\s+(or\s+replace\s+)?function\b/i;
 const CREATE_VIEW_RE = /^create\s+(or\s+replace\s+)?view\b/i;
 
 /** Strips leading whitespace, `-- ...` line comments, and `/* ... *‌/` block comments so classification regexes see the first real keyword. */
-function stripLeadingTrivia(text: string): string {
+export function stripLeadingTrivia(text: string): string {
   let value = text;
   while (true) {
     const withoutWhitespace = value.replace(/^\s+/, "");

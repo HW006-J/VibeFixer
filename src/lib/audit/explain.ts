@@ -24,8 +24,9 @@ export function explainAllowAllUsing(operation: PolicyOperation | null, table: s
   return `This policy's USING clause is the literal boolean true, so PostgreSQL treats it as satisfied for every row regardless of who is asking. Row Level Security is effectively disabled: any client holding this role can ${access}${scope}.`;
 }
 
-export function remediateAllowAllUsing(): string {
-  return "Scope the expression to the requesting user instead, e.g. USING (auth.uid() = owner_id).";
+export function remediateAllowAllUsing(ownerColumnHint: string | null): string {
+  const column = ownerColumnHint ?? "owner_id";
+  return `Scope the expression to the requesting user instead, e.g. USING (auth.uid() = ${column}).`;
 }
 
 /** Explanation for a WITH CHECK (true) allow-all clause. */
@@ -35,8 +36,9 @@ export function explainAllowAllWithCheck(operation: PolicyOperation | null, tabl
   return `This policy's WITH CHECK clause is the literal boolean true, so PostgreSQL accepts any new or modified row regardless of its values. Any client holding this role can ${verb} rows${scope} claiming ownership by any tenant — for example setting the owner column to someone else's id.`;
 }
 
-export function remediateAllowAllWithCheck(): string {
-  return "Scope the expression to the requesting user instead, e.g. WITH CHECK (auth.uid() = owner_id).";
+export function remediateAllowAllWithCheck(ownerColumnHint: string | null): string {
+  const column = ownerColumnHint ?? "owner_id";
+  return `Scope the expression to the requesting user instead, e.g. WITH CHECK (auth.uid() = ${column}).`;
 }
 
 function describeAnonAccess(operation: PolicyOperation | null): string {
@@ -100,8 +102,9 @@ export function explainLoginOnly(clause: "USING" | "WITH CHECK", table: string |
   return `This ${clause} expression${scope} confirms the requester is authenticated, but does not bind the current row to the requesting user or tenant. Authentication is confirmed, but the policy does not bind the current row to the requesting user or tenant — any logged-in user can access every row.`;
 }
 
-export function remediateLoginOnly(): string {
-  return "Add a comparison to the requesting user's identity, e.g. USING (auth.uid() = owner_id), rather than only checking that a user is logged in.";
+export function remediateLoginOnly(ownerColumnHint: string | null): string {
+  const column = ownerColumnHint ?? "owner_id";
+  return `Add a comparison to the requesting user's identity, e.g. USING (auth.uid() = ${column}), rather than only checking that a user is logged in.`;
 }
 
 export function explainNonNullOwnerOnly(clause: "USING" | "WITH CHECK", table: string | null, column: string): string {
