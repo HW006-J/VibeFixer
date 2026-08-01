@@ -1,7 +1,8 @@
 import { buildSchemaInventory } from "./build-inventory";
+import { analyzeFirebaseRules } from "./firebase-rules";
 import { runDeterministicRules } from "./run-rules";
 import { evaluateSecurityDefinerFunctions, evaluateSecurityDefinerViews } from "./security-definer-rules";
-import type { AuditCoverage, AuditReport, TableCoverageSummary } from "./types";
+import type { AuditCoverage, AuditFinding, AuditReport, TableCoverageSummary } from "./types";
 import type { ScannedFile } from "../scanner/types";
 import {
   isAiSemanticReviewAvailable,
@@ -23,6 +24,28 @@ function normaliseTableName(name: string): string {
 }
 
 /**
+ * Routes each scanned file to the analyzer that understands it. The SQL
+ * pipeline is deliberately left with only SQL: it is the most-tested code
+ * in the project and the live demo depends on it, so widening the scanner
+ * adds analyzers alongside it rather than teaching it new formats.
+ *
+ * Every non-SQL analyzer is static-only. None of them can be proven by
+ * execution the way the RLS leak can, and makeFinding's default keeps
+ * liveValidationAvailable false for all of them.
+ */
+function analyzeNonSqlFiles(files: ScannedFile[], repository: string): AuditFinding[] {
+  const findings: AuditFinding[] = [];
+
+  for (const file of files) {
+    if (file.path === "firebase.rules") {
+      findings.push(...analyzeFirebaseRules(file, repository));
+    }
+  }
+
+  return findings;
+}
+
+/**
  * Runs the full audit pipeline: discover SQL statements → build the schema
  * and RLS inventory → run deterministic rules → optionally send review-tier
  * findings for a real AI semantic opinion (only when GEMINI_API_KEY is
@@ -35,10 +58,14 @@ export async function runAudit(
 ): Promise<AuditReport> {
   const startedAt = Date.now();
 
-  const inventory = buildSchemaInventory(files);
+  const sqlFiles = files.filter((file) => file.path.endsWith(".sql"));
+  const otherFiles = files.filter((file) => !file.path.endsWith(".sql"));
+
+  const inventory = buildSchemaInventory(sqlFiles);
   const { findings, noIssueFoundCount } = runDeterministicRules(inventory, repository);
   findings.push(...evaluateSecurityDefinerFunctions(inventory.functions, repository));
   findings.push(...evaluateSecurityDefinerViews(inventory.views, inventory.tables, repository));
+  findings.push(...analyzeNonSqlFiles(otherFiles, repository));
 
   let aiReviewsPerformed = 0;
   if (isAiSemanticReviewAvailable()) {

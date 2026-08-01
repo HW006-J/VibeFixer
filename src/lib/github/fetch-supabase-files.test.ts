@@ -69,6 +69,57 @@ describe("fetchSupabaseFiles", () => {
     }
   });
 
+  it("fetches the non-SQL families and never a real .env", async () => {
+    mockFetchRoutes([
+      { match: /\/repos\/some-owner\/some-repo$/, response: () => jsonResponse({ default_branch: "main" }) },
+      {
+        match: /\/git\/trees\/main/,
+        response: () =>
+          jsonResponse({
+            truncated: false,
+            tree: [
+              { path: "firebase.rules", type: "blob", size: 80 },
+              { path: "package.json", type: "blob", size: 90 },
+              { path: "src/lib/supabaseClient.ts", type: "blob", size: 70 },
+              { path: ".env.example", type: "blob", size: 40 },
+              // Must never be fetched, even though it sits beside the example.
+              { path: ".env", type: "blob", size: 40 },
+              { path: ".env.local", type: "blob", size: 40 },
+              { path: "node_modules/left-pad/package.json", type: "blob", size: 40 },
+            ],
+          }),
+      },
+      {
+        match: /contents\/firebase\.rules/,
+        response: () => jsonResponse({ encoding: "base64", content: base64Of("{}") }),
+      },
+      {
+        match: /contents\/package\.json/,
+        response: () => jsonResponse({ encoding: "base64", content: base64Of("{}") }),
+      },
+      {
+        match: /contents\/src\/lib\/supabaseClient\.ts/,
+        response: () => jsonResponse({ encoding: "base64", content: base64Of("export const x = 1;") }),
+      },
+      {
+        match: /contents\/\.env\.example/,
+        response: () => jsonResponse({ encoding: "base64", content: base64Of("KEY=") }),
+      },
+    ]);
+
+    const result = await fetchSupabaseFiles(REPO);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.files.map((f) => f.path).sort()).toEqual([
+        ".env.example",
+        "firebase.rules",
+        "package.json",
+        "src/lib/supabaseClient.ts",
+      ]);
+    }
+  });
+
   it("returns NOT_FOUND for a missing or private repository", async () => {
     mockFetchRoutes([
       { match: /\/repos\/some-owner\/some-repo$/, response: () => jsonResponse({}, { status: 404 }) },

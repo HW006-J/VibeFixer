@@ -1,10 +1,20 @@
-import type { AuditFinding, AuditFindingTier, AuditReport, SecurityRiskLevel, SecuritySummary } from "./types";
+import type {
+  AuditFinding,
+  AuditFindingTier,
+  AuditReport,
+  AuditRuleId,
+  SecurityRiskLevel,
+  SecuritySummary,
+} from "./types";
 
 /**
  * Every rule ID this scanner can currently produce. Kept as a plain array
  * (rather than derived from the AuditRuleId union, which TypeScript can't
  * enumerate at runtime) so "checks run" in the summary reflects the real
  * size of the rule pack — update this alongside AuditRuleId in types.ts.
+ *
+ * The exhaustiveness guard below turns forgetting into a compile error
+ * rather than a silently under-reported count.
  */
 const ALL_RULE_IDS = [
   "RLS_ALLOW_ALL",
@@ -19,7 +29,18 @@ const ALL_RULE_IDS = [
   "VIBE_PERMISSIVE_POLICY_BROADENING",
   "VIBE_SECURITY_DEFINER_SEARCH_PATH",
   "VIBE_SECURITY_DEFINER_VIEW",
-] as const;
+  "VIBE_FIREBASE_PUBLIC_RULE",
+  "VIBE_FIREBASE_AUTH_ONLY_RULE",
+] as const satisfies readonly AuditRuleId[];
+
+/**
+ * Compile-time proof that ALL_RULE_IDS lists every member of AuditRuleId.
+ * If a rule is added to the union and not to the array above, this
+ * assignment fails to typecheck with the missing ID named in the error.
+ */
+type UncountedRuleId = Exclude<AuditRuleId, (typeof ALL_RULE_IDS)[number]>;
+const _everyRuleIsCounted: UncountedRuleId extends never ? true : never = true;
+void _everyRuleIsCounted;
 
 const TIER_PRIORITY: Record<AuditFindingTier, number> = { critical: 0, high: 1, review: 2 };
 

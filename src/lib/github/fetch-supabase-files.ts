@@ -1,5 +1,6 @@
 import type { ScannedFile } from "../scanner/types";
 import type { ParsedRepository } from "./parse-repository-url";
+import { isPermittedPath } from "./path-policy";
 import {
   githubRequest,
   type ContentsResponse,
@@ -19,18 +20,15 @@ const MAX_PERMITTED_FILES = 50;
 const MAX_FILE_SIZE_BYTES = 200 * 1024;
 const MAX_TOTAL_SIZE_BYTES = 1024 * 1024;
 
-const SUPABASE_MIGRATION_PATH = /^supabase\/migrations\/[^/]+\.sql$/;
-const SUPABASE_SCHEMA_PATH = "supabase/schema.sql";
-
-function isPermittedPath(path: string): boolean {
-  return SUPABASE_MIGRATION_PATH.test(path) || path === SUPABASE_SCHEMA_PATH;
-}
-
 /**
- * Fetches only the permitted Supabase SQL files (`supabase/migrations/*.sql`
- * and, if present, `supabase/schema.sql`) from the given public repository
- * using the GitHub REST API. No other paths are ever requested, and no raw
- * content URL is ever accepted or constructed from user input.
+ * Fetches the permitted files from the given public repository using the
+ * GitHub REST API. What "permitted" means lives in `path-policy.ts` and
+ * nowhere else — it covers Supabase SQL plus the non-SQL families the audit
+ * engine understands, and it denies environment files, dependency trees and
+ * build output outright.
+ *
+ * No other paths are ever requested, and no raw content URL is ever
+ * accepted or constructed from user input.
  */
 export async function fetchSupabaseFiles(
   repository: ParsedRepository,
