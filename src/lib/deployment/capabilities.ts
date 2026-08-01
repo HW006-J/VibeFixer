@@ -13,6 +13,12 @@ export type DeploymentCapabilities = {
   databaseMutation: boolean;
   /** Resetting the demo back to its vulnerable state — the same CLI mechanism as databaseMutation. */
   demoReset: boolean;
+  /**
+   * Opening a pull request with the trusted repair — plain HTTPS to the
+   * GitHub API, so unlike databaseMutation it works anywhere GITHUB_TOKEN
+   * is configured, Vercel included.
+   */
+  pullRequest: boolean;
   /** Set only when databaseMutation/demoReset are false, explaining exactly why. Null when everything checked is available. */
   reason: string | null;
 };
@@ -38,6 +44,9 @@ export type DeploymentCapabilities = {
 export async function detectDeploymentCapabilities(): Promise<DeploymentCapabilities> {
   const liveValidation = readDemoSupabaseConfig() !== null;
   const geminiAnalysis = isGeminiConfigured();
+  // Plain HTTPS to the GitHub API — no CLI, no linked project directory,
+  // so this is available wherever a token is configured.
+  const pullRequest = Boolean(process.env.GITHUB_TOKEN);
 
   if (process.env.VERCEL === "1") {
     return {
@@ -46,6 +55,7 @@ export async function detectDeploymentCapabilities(): Promise<DeploymentCapabili
       geminiAnalysis,
       databaseMutation: false,
       demoReset: false,
+      pullRequest,
       reason:
         "Policy apply and demo reset require the authenticated local Supabase CLI and a linked project directory, which are not available in this serverless deployment. Run this app locally to use the full repair/reset workflow.",
     };
@@ -59,6 +69,7 @@ export async function detectDeploymentCapabilities(): Promise<DeploymentCapabili
       geminiAnalysis,
       databaseMutation: true,
       demoReset: true,
+      pullRequest,
       reason: null,
     };
   }
@@ -69,6 +80,7 @@ export async function detectDeploymentCapabilities(): Promise<DeploymentCapabili
     geminiAnalysis,
     databaseMutation: false,
     demoReset: false,
+    pullRequest,
     reason: mutationReadiness.message,
   };
 }
