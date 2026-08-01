@@ -150,6 +150,21 @@ describe("openTrustedRepairPullRequest — the token never leaks", () => {
 });
 
 describe("openTrustedRepairPullRequest — failure handling", () => {
+  it("maps a 401 to an invalid-token outcome, distinct from insufficient permission", async () => {
+    // 401 and 403 mean different things and need different fixes: 401 is
+    // "this token is not valid" (revoked, expired, or a stale deployment
+    // still running an old value), 403 is "this token is valid but may not
+    // do that". Collapsing them makes the fault unfindable from the
+    // response alone.
+    vi.stubEnv("GITHUB_TOKEN", "ghp_test_token_value");
+    vi.stubEnv("DEMO_GITHUB_REPOSITORY", "HW006-J/rls-red-alert-demo-target");
+    mockGithub([{ match: /\/git\/refs$/, response: () => jsonResponse({ message: "Bad credentials" }, 401) }]);
+
+    const result = await openTrustedRepairPullRequest(REPO, { stamp: STAMP });
+
+    expect(result).toMatchObject({ ok: false, error: "GITHUB_TOKEN_INVALID" });
+  });
+
   it("maps a 403 to a forbidden outcome rather than a generic failure", async () => {
     vi.stubEnv("GITHUB_TOKEN", "ghp_test_token_value");
     vi.stubEnv("DEMO_GITHUB_REPOSITORY", "HW006-J/rls-red-alert-demo-target");

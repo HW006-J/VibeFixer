@@ -33,6 +33,7 @@ export type OpenPullRequestErrorCode =
   | "TOKEN_MISSING"
   | "REPOSITORY_NOT_AUTHORISED"
   | "SERVER_MISCONFIGURED"
+  | "GITHUB_TOKEN_INVALID"
   | "GITHUB_FORBIDDEN"
   | "GITHUB_FAILED"
   | "TIMEOUT"
@@ -49,8 +50,10 @@ const MESSAGES: Record<OpenPullRequestErrorCode, string> = {
   REPOSITORY_NOT_AUTHORISED:
     "This action is only available for the configured demonstration repository.",
   SERVER_MISCONFIGURED: "The server is not configured with a demonstration repository.",
+  GITHUB_TOKEN_INVALID:
+    "GitHub rejected the token itself as invalid. It may be expired or revoked — or this deployment may still be running an older value, since changing an environment variable does not affect a deployment until it is rebuilt.",
   GITHUB_FORBIDDEN:
-    "GitHub refused the request. The configured token is likely missing write access to the demonstration repository.",
+    "GitHub accepted the token but refused the action. It is missing write access to the demonstration repository — Contents and Pull requests both need write permission.",
   GITHUB_FAILED: "GitHub rejected the request. No pull request was opened.",
   TIMEOUT: "Timed out talking to GitHub. No pull request was opened.",
   NETWORK_ERROR: "Could not reach GitHub. No pull request was opened.",
@@ -86,7 +89,15 @@ async function githubRequest(
       ...(init?.body ? { body: JSON.stringify(init.body) } : {}),
     });
 
-    if (response.status === 401 || response.status === 403) {
+    // 401 and 403 need different fixes, so they get different codes. 401 is
+    // "this token is not valid" — expired, revoked, or a deployment still
+    // running a stale value. 403 is "this token is valid but may not do
+    // that" — a scope problem. Collapsing them makes the fault
+    // undiagnosable from the response alone.
+    if (response.status === 401) {
+      return { ok: false, error: "GITHUB_TOKEN_INVALID", message: MESSAGES.GITHUB_TOKEN_INVALID };
+    }
+    if (response.status === 403) {
       return { ok: false, error: "GITHUB_FORBIDDEN", message: MESSAGES.GITHUB_FORBIDDEN };
     }
     if (!response.ok) {
