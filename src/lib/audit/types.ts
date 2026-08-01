@@ -10,7 +10,12 @@ export type AuditRuleId =
   | "VIBE_USER_METADATA_AUTHORIZATION"
   | "VIBE_PERMISSIVE_POLICY_BROADENING"
   | "VIBE_SECURITY_DEFINER_SEARCH_PATH"
-  | "VIBE_SECURITY_DEFINER_VIEW";
+  | "VIBE_SECURITY_DEFINER_VIEW"
+  // Non-SQL families. These are static-only: none of them can be proven by
+  // execution the way the RLS leak can, so they never set
+  // liveValidationAvailable.
+  | "VIBE_FIREBASE_PUBLIC_RULE"
+  | "VIBE_FIREBASE_AUTH_ONLY_RULE";
 
 /**
  * "critical" = a confirmed deterministic pattern with the clearest possible
@@ -24,7 +29,12 @@ export type AuditFindingTier = "critical" | "high" | "review";
 
 export type AuditFindingConfidence = "high" | "medium" | "low";
 
-export type AuditFindingObjectType = "table" | "view" | "function";
+/**
+ * `table` / `view` / `function` are SQL schema objects. `config` covers
+ * non-SQL policy and configuration files (e.g. Firebase rules), where the
+ * finding is about a declaration rather than a database object.
+ */
+export type AuditFindingObjectType = "table" | "view" | "function" | "config";
 
 export type AiReviewAssessment = "likely_safe" | "likely_unsafe" | "uncertain";
 

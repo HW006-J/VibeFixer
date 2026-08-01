@@ -102,3 +102,49 @@ describe("runAudit", () => {
     expect(viewFinding?.liveValidationAvailable).toBe(false);
   });
 });
+
+describe("runAudit — non-SQL families", () => {
+  it("reports Firebase rules findings alongside SQL findings", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "");
+
+    const files: ScannedFile[] = [
+      file("supabase/migrations/0001.sql", [
+        "create table public.clients (id uuid primary key);",
+        "alter table public.clients enable row level security;",
+        'create policy "leaky" on public.clients for select to public using (true);',
+      ]),
+      file("firebase.rules", ["{", '  "rules": {', '    ".read": true', "  }", "}"]),
+    ];
+
+    const report = await runAudit(REPOSITORY, true, files);
+
+    const firebase = report.findings.filter((f) => f.ruleId === "VIBE_FIREBASE_PUBLIC_RULE");
+    expect(firebase).toHaveLength(1);
+    expect(firebase[0].filePath).toBe("firebase.rules");
+
+    // The SQL pipeline must be unaffected by the presence of other families.
+    expect(report.findings.some((f) => f.ruleId === "VIBE_ANON_ALLOW_ALL" || f.ruleId === "RLS_ALLOW_ALL")).toBe(true);
+  });
+
+  it("never marks a non-SQL finding as live-verifiable, even on the demo repository", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "");
+
+    const files: ScannedFile[] = [file("firebase.rules", ['{ "rules": { ".write": true } }'])];
+
+    const report = await runAudit(REPOSITORY, true, files);
+
+    expect(report.findings).toHaveLength(1);
+    expect(report.findings[0].liveValidationAvailable).toBe(false);
+  });
+
+  it("does not count a non-SQL file as an inspected SQL statement", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "");
+
+    const files: ScannedFile[] = [file("firebase.rules", ['{ "rules": { ".read": true } }'])];
+
+    const report = await runAudit(REPOSITORY, true, files);
+
+    expect(report.coverage.statementsInspected).toBe(0);
+    expect(report.coverage.policiesInspected).toBe(0);
+  });
+});

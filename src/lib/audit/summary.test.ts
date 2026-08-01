@@ -141,4 +141,13 @@ describe("computeSecuritySummary", () => {
     const summary = computeSecuritySummary(makeReport());
     expect(summary.checksRun).toBeGreaterThanOrEqual(12);
   });
+
+  it("counts every rule the engine can emit, including the non-SQL families", () => {
+    // Exact, not >=. "Checks run" is a claim we make to the user about how
+    // much was inspected, so it must track the rule pack precisely. When
+    // you add a rule, this number changes — that is the point. A
+    // compile-time guard in summary.ts catches the same mistake earlier.
+    const summary = computeSecuritySummary(makeReport());
+    expect(summary.checksRun).toBe(14);
+  });
 });
