@@ -77,6 +77,16 @@ const PROPOSAL = {
 const APPLY_SUCCESS = { ok: true, repository: "x", appliedExpression: "auth.uid() = trainer_id" };
 const RESET_SUCCESS = { ok: true, repository: "x", restoredExpression: "true" };
 
+const FULL_CAPABILITIES = {
+  ok: true,
+  staticScan: true,
+  liveValidation: true,
+  geminiAnalysis: true,
+  databaseMutation: true,
+  demoReset: true,
+  reason: null,
+};
+
 function jsonResponse(body: unknown): Promise<Response> {
   return Promise.resolve({ json: () => Promise.resolve(body) } as unknown as Response);
 }
@@ -87,23 +97,26 @@ type Queues = {
   propose?: unknown[];
   apply?: unknown[];
   reset?: unknown[];
+  capabilities?: unknown[];
 };
 
 function mockFetch(queues: Queues) {
   const indices: Partial<Record<keyof Queues, number>> = {};
-  function next(key: keyof Queues) {
-    const queue = queues[key] ?? [];
+  function next(key: keyof Queues, fallback: unknown) {
+    const queue = queues[key] ?? [fallback];
     const i = indices[key] ?? 0;
     indices[key] = i + 1;
     return queue[Math.min(i, queue.length - 1)];
   }
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : (input as URL).toString();
-    if (url.includes("/api/repair/live-state")) return jsonResponse(next("liveState"));
-    if (url.includes("/api/live-validate")) return jsonResponse(next("liveValidate"));
-    if (url.includes("/api/repair/propose")) return jsonResponse(next("propose"));
-    if (url.includes("/api/repair/apply")) return jsonResponse(next("apply"));
-    if (url.includes("/api/repair/reset")) return jsonResponse(next("reset"));
+    if (url.includes("/api/repair/live-state")) return jsonResponse(next("liveState", undefined));
+    if (url.includes("/api/live-validate")) return jsonResponse(next("liveValidate", undefined));
+    if (url.includes("/api/repair/propose")) return jsonResponse(next("propose", undefined));
+    if (url.includes("/api/repair/apply")) return jsonResponse(next("apply", undefined));
+    if (url.includes("/api/repair/reset")) return jsonResponse(next("reset", undefined));
+    // Defaults to fully-available capabilities (matching localhost) unless a test overrides it.
+    if (url.includes("/api/deployment-capabilities")) return jsonResponse(next("capabilities", FULL_CAPABILITIES));
     return Promise.reject(new Error(`unexpected fetch to ${url}`));
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -162,6 +175,63 @@ describe("SecurityDemoPanel", () => {
     const details = document.querySelector("details");
     expect(details).not.toBeNull();
     expect(details?.open).toBe(false);
+  });
+
+  it("does not offer Reset vulnerable demo when demoReset is false, showing the real reason instead", async () => {
+    mockFetch({
+      liveState: [PROTECTED_STATE],
+      capabilities: [
+        {
+          ...FULL_CAPABILITIES,
+          databaseMutation: false,
+          demoReset: false,
+          reason: "Policy apply and demo reset require the authenticated local Supabase CLI, which is not available in this serverless deployment.",
+        },
+      ],
+    });
+    render(<SecurityDemoPanel repositoryUrl={REPO_URL} refreshToken={1} sourceState="finding_present" />);
+
+    await screen.findByText(/live database protected/i);
+    expect(screen.queryByRole("button", { name: /reset vulnerable demo/i })).toBeNull();
+    expect(screen.getByText(/not available in this serverless deployment/i)).toBeTruthy();
+  });
+
+  it("does not offer Approve and apply repair when databaseMutation is false, showing the real reason instead", async () => {
+    mockFetch({
+      liveState: [VULNERABLE_STATE],
+      liveValidate: [VALIDATE_VULNERABLE],
+      propose: [PROPOSAL],
+      capabilities: [
+        {
+          ...FULL_CAPABILITIES,
+          databaseMutation: false,
+          demoReset: false,
+          reason: "Policy apply and demo reset require the authenticated local Supabase CLI, which is not available in this serverless deployment.",
+        },
+      ],
+    });
+    render(<SecurityDemoPanel repositoryUrl={REPO_URL} refreshToken={1} sourceState="finding_present" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /run live validation/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /ask gemini to design repair/i }));
+
+    await screen.findByText(/gemini repair proposal/i);
+    expect(screen.queryByRole("button", { name: /approve and apply repair/i })).toBeNull();
+    expect(screen.getByText(/not available in this serverless deployment/i)).toBeTruthy();
+  });
+
+  it("does not offer Ask Gemini to design repair when geminiAnalysis is false", async () => {
+    mockFetch({
+      liveState: [VULNERABLE_STATE],
+      liveValidate: [VALIDATE_VULNERABLE],
+      capabilities: [{ ...FULL_CAPABILITIES, geminiAnalysis: false }],
+    });
+    render(<SecurityDemoPanel repositoryUrl={REPO_URL} refreshToken={1} sourceState="finding_present" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /run live validation/i }));
+
+    await screen.findByText(/gemini analysis is not configured/i);
+    expect(screen.queryByRole("button", { name: /ask gemini to design repair/i })).toBeNull();
   });
 
   it("drives real returned counts into the visible label rather than a fixed string", async () => {

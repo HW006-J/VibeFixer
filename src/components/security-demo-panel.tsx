@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { DeploymentCapabilities } from "@/lib/deployment/capabilities";
+import type { DeploymentCapabilitiesResponse } from "@/lib/deployment/api-types";
 import type {
   LiveStateApiResponse,
   RepairApplyApiResponse,
@@ -8,6 +10,16 @@ import type {
   RepairResetApiResponse,
 } from "@/lib/repair/api-types";
 import type { LiveValidationApiResponse } from "@/lib/scanner/api-types";
+
+/** Used while the real capabilities check is still in flight — deliberately conservative: mutation-gated actions stay hidden until proven available, never shown then yanked away. */
+const LOADING_CAPABILITIES: DeploymentCapabilities = {
+  staticScan: true,
+  liveValidation: true,
+  geminiAnalysis: true,
+  databaseMutation: false,
+  demoReset: false,
+  reason: null,
+};
 
 export type SourceState = "finding_present" | "no_finding" | "scan_unavailable";
 
@@ -139,6 +151,25 @@ export function SecurityDemoPanel({
   const currentKey = `${repositoryUrl}::${refreshToken}`;
   const [liveRecord, setLiveRecord] = useState<LiveRecord | null>(null);
   const [session, setSession] = useState<SessionState | null>(null);
+  const [capabilities, setCapabilities] = useState<DeploymentCapabilities | null>(null);
+
+  // Deployment capabilities are a property of the running server, not of
+  // any particular scan — fetched once, not re-keyed by currentKey.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/deployment-capabilities")
+      .then((response) => response.json() as Promise<DeploymentCapabilitiesResponse>)
+      .then((data) => {
+        if (!cancelled) setCapabilities(data);
+      })
+      .catch(() => {
+        // Leave capabilities null on failure — LOADING_CAPABILITIES' safe
+        // defaults keep mutation-gated actions hidden rather than shown.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -319,6 +350,7 @@ export function SecurityDemoPanel({
 
   const liveStatus = liveRecord.step === "loaded" ? liveRecord.data.status : "error";
   const showDrift = sourceState === "finding_present" && liveStatus === "protected";
+  const effectiveCapabilities = capabilities ?? LOADING_CAPABILITIES;
 
   return (
     <div className="flex flex-col gap-4">
@@ -345,11 +377,17 @@ export function SecurityDemoPanel({
       )}
 
       {liveRecord.step === "loaded" && liveRecord.data.status === "vulnerable" && (
-        <VulnerableCard session={activeSession} onValidate={runValidate} onPropose={runPropose} onApply={runApply} />
+        <VulnerableCard
+          session={activeSession}
+          capabilities={effectiveCapabilities}
+          onValidate={runValidate}
+          onPropose={runPropose}
+          onApply={runApply}
+        />
       )}
 
       {liveRecord.step === "loaded" && liveRecord.data.status === "protected" && (
-        <ProtectedCard session={activeSession} liveData={liveRecord.data} onReset={runReset} />
+        <ProtectedCard session={activeSession} capabilities={effectiveCapabilities} liveData={liveRecord.data} onReset={runReset} />
       )}
     </div>
   );
@@ -429,11 +467,13 @@ function SecurityStatusCard({
 
 function VulnerableCard({
   session,
+  capabilities,
   onValidate,
   onPropose,
   onApply,
 }: {
   session: SessionState;
+  capabilities: DeploymentCapabilities;
   onValidate: () => void;
   onPropose: () => void;
   onApply: () => void;
@@ -505,13 +545,14 @@ function VulnerableCard({
         </div>
       )}
 
-      <div className="mt-4">{renderVulnerablePrimaryAction(session, onValidate, onPropose, onApply)}</div>
+      <div className="mt-4">{renderVulnerablePrimaryAction(session, capabilities, onValidate, onPropose, onApply)}</div>
     </div>
   );
 }
 
 function renderVulnerablePrimaryAction(
   session: SessionState,
+  capabilities: DeploymentCapabilities,
   onValidate: () => void,
   onPropose: () => void,
   onApply: () => void,
@@ -531,6 +572,13 @@ function renderVulnerablePrimaryAction(
   }
 
   if (proposal === null) {
+    if (!capabilities.geminiAnalysis) {
+      return (
+        <p className="text-xs text-amber-300">
+          Gemini analysis is not configured on this deployment — no GEMINI_API_KEY is set.
+        </p>
+      );
+    }
     return (
       <button type="button" onClick={onPropose} className={`bg-sky-600 hover:bg-sky-500 focus-visible:ring-sky-400 ${primaryButtonClasses}`}>
         Ask Gemini to design repair
@@ -542,6 +590,14 @@ function renderVulnerablePrimaryAction(
     return null;
   }
 
+  if (!capabilities.databaseMutation) {
+    return (
+      <p className="text-xs text-amber-300">
+        {capabilities.reason ?? "Applying this repair is not available in this deployment."}
+      </p>
+    );
+  }
+
   return (
     <button type="button" onClick={onApply} className={`bg-emerald-600 hover:bg-emerald-500 focus-visible:ring-emerald-400 ${primaryButtonClasses}`}>
       Approve and apply repair
@@ -551,10 +607,12 @@ function renderVulnerablePrimaryAction(
 
 function ProtectedCard({
   session,
+  capabilities,
   liveData,
   onReset,
 }: {
   session: SessionState;
+  capabilities: DeploymentCapabilities;
   liveData: Extract<LiveStateApiResponse, { ok: true; status: "protected" }>;
   onReset: () => void;
 }) {
@@ -594,7 +652,7 @@ function ProtectedCard({
       <div className="mt-4">
         {session.action === "resetting" ? (
           <Spinner label="Resetting…" />
-        ) : (
+        ) : capabilities.demoReset ? (
           <button
             type="button"
             onClick={onReset}
@@ -602,6 +660,10 @@ function ProtectedCard({
           >
             Reset vulnerable demo
           </button>
+        ) : (
+          <p className="text-xs text-amber-300">
+            {capabilities.reason ?? "Resetting the demo is not available in this deployment."}
+          </p>
         )}
       </div>
 

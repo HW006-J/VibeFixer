@@ -31,26 +31,50 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 ## Deploy on Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Vibe Fixer deploys to Vercel as a standard Next.js App Router project — import the GitHub
+repository at [vercel.com/new](https://vercel.com/new) and set the following environment
+variables on the Vercel project (Project Settings → Environment Variables), matching
+`.env.example`:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `DEMO_GITHUB_REPOSITORY`
+- `DEMO_SUPABASE_URL`, `DEMO_SUPABASE_ANON_KEY`
+- `DEMO_ATTACKER_EMAIL`, `DEMO_ATTACKER_PASSWORD`, `DEMO_VICTIM_EMAIL`, `DEMO_VICTIM_PASSWORD`
+- `GEMINI_API_KEY`, `GEMINI_MODEL` (optional — see below)
+- `GITHUB_TOKEN` (optional, raises the GitHub API rate limit)
+
+Do **not** set `SUPABASE_CLI_PATH` or `SUPABASE_DATABASE_URL` on Vercel — they're only
+meaningful for the local CLI mutation mechanism described below, which cannot run there.
+
+On Vercel, this genuinely supports: public GitHub repository scanning, the full deterministic
+security-check pack, the executive summary, real live validation against the authorised demo
+Supabase project, and real Gemini repair-proposal analysis — all of it over plain HTTPS. The
+UI derives this from a real server-side capability check
+(`GET /api/deployment-capabilities`, `src/lib/deployment/capabilities.ts`) rather than
+assuming it — see "Known limitations" below for the one thing that's genuinely different.
 
 ## Known limitations
 
-**Policy apply/reset currently requires the authenticated local Supabase CLI, not Vercel serverless execution.**
+**Policy apply and demo reset require the authenticated local Supabase CLI — genuine and
+fully supported locally, unavailable on Vercel by design, not by omission.**
 
 `src/lib/repair/db-admin.ts` applies and resets the demo RLS policy by shelling out to the
-Supabase CLI (`supabase db query --linked`) on the machine running the app. This is genuine,
-real DDL execution — not a mock — and is fully supported for running the demo locally
-(`npm run dev`) on a machine where the CLI is installed, authenticated, and linked to the
-demo Supabase project via `supabase link`.
+Supabase CLI (`supabase db query --linked`) on the machine running the app. This is real DDL
+execution — not a mock — and works fully when running locally (`npm run dev`) on a machine
+where the CLI is installed, authenticated, and linked to the demo Supabase project via
+`supabase link`.
 
-It is **not** currently compatible with a Vercel serverless deployment: Vercel functions
-don't have the Supabase CLI installed, don't hold a CLI auth session, and can't `exec` an
-external binary in that environment. Running the AI-repair "Apply" and "Reset" steps on a
-Vercel-hosted deployment of this app will fail with `CLI_UNAVAILABLE`. The scan, detection,
-live-validation (read-only), and AI-proposal steps all work over plain HTTPS and are
-unaffected by this limitation — only the two mutating steps (apply/reset) require the local
-CLI mechanism. Replacing this with a serverless-compatible mutation path (e.g. calling
-Supabase's management API directly with a scoped service credential) was intentionally left
-out of scope for this task.
+It cannot work on Vercel's serverless functions: they don't have the Supabase CLI installed,
+don't hold a persistent CLI auth session, and don't have a filesystem-linked project directory
+between invocations. Rather than let a click silently fail against a route that's guaranteed
+not to work, the deployment capability check (`src/lib/deployment/capabilities.ts`) detects
+Vercel via the platform's own `VERCEL` environment variable and reports
+`databaseMutation`/`demoReset` as unavailable up front, with a plain-English reason — the UI
+never renders the "Approve and apply repair" or "Reset vulnerable demo" buttons on Vercel at
+all. Everywhere else (localhost, or any other host), the same check instead runs the real CLI
+readiness probe (`checkMutationReadiness()`), so a genuinely broken local CLI setup is still
+reported honestly rather than assumed to work just because the host isn't Vercel.
+
+Replacing the CLI mutation mechanism with a serverless-compatible path (e.g. calling
+Supabase's management API directly with a scoped service credential) remains intentionally
+out of scope — this milestone makes the limitation accurate and self-explanatory, not the
+mechanism itself different.
