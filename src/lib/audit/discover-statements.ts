@@ -5,6 +5,8 @@ export type SqlStatementType =
   | "CREATE_POLICY"
   | "ALTER_POLICY"
   | "DROP_POLICY"
+  | "CREATE_FUNCTION"
+  | "CREATE_VIEW"
   | "OTHER";
 
 export type SqlStatement = {
@@ -15,13 +17,14 @@ export type SqlStatement = {
   startIndex: number;
 };
 
+const DOLLAR_QUOTE_OPEN_RE = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/;
+
 /**
  * Splits SQL source into top-level statements, respecting single-quoted
- * string literals, double-quoted identifiers, and `--` / `/* *‌/` comments
- * so that semicolons or keywords inside a string or comment never split or
- * misclassify a statement. Does not handle dollar-quoted bodies (`$$...$$`)
- * since none of the constructs this scanner cares about (CREATE TABLE,
- * ALTER TABLE, CREATE/ALTER/DROP POLICY) use them.
+ * string literals, double-quoted identifiers, dollar-quoted bodies
+ * (`$$...$$` / `$tag$...$tag$`, used almost universally for function
+ * bodies), and `--` / `/* *‌/` comments so that semicolons or keywords
+ * inside any of these never split or misclassify a statement.
  */
 export function splitSqlStatements(content: string): SqlStatement[] {
   const statements: SqlStatement[] = [];
@@ -44,6 +47,18 @@ export function splitSqlStatements(content: string): SqlStatement[] {
       const close = content.indexOf("*/", i + 2);
       i = close === -1 ? length : close + 2;
       continue;
+    }
+
+    // Dollar-quoted body ($$...$$ or $tag$...$tag$) — must be checked
+    // before generic "$" handling since it has no other special meaning.
+    if (char === "$") {
+      const tagMatch = DOLLAR_QUOTE_OPEN_RE.exec(content.slice(i));
+      if (tagMatch) {
+        const delimiter = tagMatch[0];
+        const closeIndex = content.indexOf(delimiter, i + delimiter.length);
+        i = closeIndex === -1 ? length : closeIndex + delimiter.length;
+        continue;
+      }
     }
 
     // Single-quoted string literal ('' is an escaped quote)
@@ -118,6 +133,8 @@ const ALTER_TABLE_DISABLE_RLS_RE = /^alter\s+table\b[\s\S]*\bdisable\s+row\s+lev
 const CREATE_POLICY_RE = /^create\s+policy\b/i;
 const ALTER_POLICY_RE = /^alter\s+policy\b/i;
 const DROP_POLICY_RE = /^drop\s+policy\b/i;
+const CREATE_FUNCTION_RE = /^create\s+(or\s+replace\s+)?function\b/i;
+const CREATE_VIEW_RE = /^create\s+(or\s+replace\s+)?view\b/i;
 
 /** Strips leading whitespace, `-- ...` line comments, and `/* ... *‌/` block comments so classification regexes see the first real keyword. */
 function stripLeadingTrivia(text: string): string {
@@ -146,5 +163,7 @@ function classifyStatement(statement: string): SqlStatementType {
   if (ALTER_TABLE_ENABLE_RLS_RE.test(stripped)) return "ALTER_TABLE_ENABLE_RLS";
   if (ALTER_TABLE_DISABLE_RLS_RE.test(stripped)) return "ALTER_TABLE_DISABLE_RLS";
   if (CREATE_TABLE_RE.test(stripped)) return "CREATE_TABLE";
+  if (CREATE_FUNCTION_RE.test(stripped)) return "CREATE_FUNCTION";
+  if (CREATE_VIEW_RE.test(stripped)) return "CREATE_VIEW";
   return "OTHER";
 }

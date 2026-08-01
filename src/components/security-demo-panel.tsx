@@ -93,6 +93,13 @@ async function postJson<T>(url: string, repositoryUrl: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+function evidenceFromLiveState(data: Extract<LiveStateApiResponse, { ok: true }>): Counts | null {
+  if (data.status === "vulnerable" || data.status === "protected") {
+    return { totalRowsReturned: data.totalRowsReturned, ownRowCount: data.ownRowCount, leakedRowCount: data.leakedRowCount };
+  }
+  return null;
+}
+
 function Spinner({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 text-sm text-zinc-300" aria-busy="true">
@@ -121,10 +128,13 @@ export function SecurityDemoPanel({
   repositoryUrl,
   refreshToken,
   sourceState,
+  onLiveEvidence,
 }: {
   repositoryUrl: string;
   refreshToken: number;
   sourceState: SourceState;
+  /** Called with real row-count evidence whenever it changes (initial check, after validating, after apply, after reset), or null when no evidence is currently available. Purely informational for an ancestor's executive summary — never used to decide anything within this component itself. */
+  onLiveEvidence?: (evidence: Counts | null) => void;
 }) {
   const currentKey = `${repositoryUrl}::${refreshToken}`;
   const [liveRecord, setLiveRecord] = useState<LiveRecord | null>(null);
@@ -137,19 +147,22 @@ export function SecurityDemoPanel({
         if (cancelled) return;
         if (!data.ok) {
           setLiveRecord({ key: currentKey, step: "error", message: data.error.message });
+          onLiveEvidence?.(null);
         } else {
           setLiveRecord({ key: currentKey, step: "loaded", data });
+          onLiveEvidence?.(evidenceFromLiveState(data));
         }
       })
       .catch(() => {
         if (!cancelled) {
           setLiveRecord({ key: currentKey, step: "error", message: "Could not reach the live state service." });
+          onLiveEvidence?.(null);
         }
       });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- currentKey is derived from these two deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- currentKey is derived from these two deps; onLiveEvidence is a stable-enough callback
   }, [repositoryUrl, refreshToken]);
 
   const activeSession = session && session.key === currentKey ? session : idleSession(currentKey);
@@ -179,6 +192,11 @@ export function SecurityDemoPanel({
             privateNotes: row.privateNotes,
           })),
         },
+      });
+      onLiveEvidence?.({
+        totalRowsReturned: data.totalRowsReturned,
+        ownRowCount: data.ownRowCount,
+        leakedRowCount: data.leakedRowCount,
       });
     } catch {
       patchSession({ action: "error", errorMessage: "Could not reach the live validation service." });
@@ -258,6 +276,7 @@ export function SecurityDemoPanel({
       }
       setLiveRecord({ key: currentKey, step: "loaded", data: liveData });
       patchSession({ action: "repair_verified", verifiedBefore: before, verifiedAfter: after });
+      onLiveEvidence?.(after);
     } catch {
       patchSession({ action: "error", errorMessage: "Could not reach the repair apply service." });
     }
@@ -282,6 +301,7 @@ export function SecurityDemoPanel({
       // applied text, verification result — not merely set action back to
       // idle. A partial reset is exactly the bug this replaces.
       setSession(idleSession(currentKey));
+      onLiveEvidence?.(evidenceFromLiveState(liveData));
     } catch {
       patchSession({ action: "error", errorMessage: "Could not reach the repair reset service." });
     }
@@ -345,6 +365,13 @@ function liveStatusLabel(status: string): string {
       return "Unexpected state";
     case "unavailable":
       return "Live inspection unavailable";
+    // "error" means the /api/repair/live-state request itself failed
+    // (network error, or the repository gate rejected it) — distinct from
+    // a real, successful response reporting status "unavailable". Collapsing
+    // both into the same "Live inspection unavailable" label hid which one
+    // actually happened; the real reason is still shown in the alert below.
+    case "error":
+      return "Live check failed — see details below";
     default:
       return "Live inspection unavailable";
   }
@@ -357,6 +384,8 @@ function liveStatusClasses(status: string): string {
     case "protected":
       return "text-emerald-300";
     case "unexpected":
+      return "text-amber-300";
+    case "error":
       return "text-amber-300";
     default:
       return "text-zinc-400";

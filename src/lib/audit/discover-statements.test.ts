@@ -67,4 +67,58 @@ create table public.real_table (id uuid primary key);
     const statements = splitSqlStatements(sql);
     expect(sql.slice(statements[1].startIndex, statements[1].startIndex + 12)).toBe("create table");
   });
+
+  it("classifies CREATE FUNCTION and CREATE OR REPLACE FUNCTION", () => {
+    const statements = splitSqlStatements(`
+create function public.f() returns void language sql as $$ select 1; $$;
+create or replace function public.g() returns void language sql as $$ select 2; $$;
+`);
+    expect(statements.map((s) => s.type)).toEqual(["CREATE_FUNCTION", "CREATE_FUNCTION"]);
+  });
+
+  it("classifies CREATE VIEW and CREATE OR REPLACE VIEW", () => {
+    const statements = splitSqlStatements(`
+create view public.v as select 1;
+create or replace view public.w as select 2;
+`);
+    expect(statements.map((s) => s.type)).toEqual(["CREATE_VIEW", "CREATE_VIEW"]);
+  });
+
+  it("does not split a CREATE FUNCTION body on a semicolon inside a $$ dollar-quoted block", () => {
+    const statements = splitSqlStatements(`
+create function public.f() returns int language plpgsql as $$
+begin
+  insert into public.log (msg) values ('hi');
+  return 1;
+end;
+$$;
+`);
+    expect(statements).toHaveLength(1);
+    expect(statements[0].type).toBe("CREATE_FUNCTION");
+    expect(statements[0].raw).toContain("return 1;");
+  });
+
+  it("does not split a dollar-quoted body on a semicolon when using a named tag", () => {
+    const statements = splitSqlStatements(`
+create function public.f() returns int language plpgsql as $function$
+begin
+  return 1;
+end;
+$function$;
+`);
+    expect(statements).toHaveLength(1);
+    expect(statements[0].type).toBe("CREATE_FUNCTION");
+  });
+
+  it("does not treat a nested $$ inside a differently-tagged dollar-quoted body as a close", () => {
+    const statements = splitSqlStatements(`
+create function public.f() returns text language plpgsql as $body$
+begin
+  return 'literal $$ inside body';
+end;
+$body$;
+create table public.after (id int);
+`);
+    expect(statements.map((s) => s.type)).toEqual(["CREATE_FUNCTION", "CREATE_TABLE"]);
+  });
 });

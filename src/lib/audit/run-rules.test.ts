@@ -116,4 +116,239 @@ describe("runDeterministicRules", () => {
     expect(findings.filter((f) => f.ruleId === "RLS_WITH_CHECK_ALLOW_ALL")).toHaveLength(0);
     expect(findings.filter((f) => f.ruleId === "RLS_ALLOW_ALL")).toHaveLength(1);
   });
+
+  describe("VIBE_PUBLIC_TABLE_RLS_DISABLED", () => {
+    it("flags a public-schema table created with RLS disabled and no policies at all", () => {
+      const { findings } = audit([file("supabase/migrations/0001.sql", ["create table public.secrets (id uuid primary key);"])]);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].ruleId).toBe("VIBE_PUBLIC_TABLE_RLS_DISABLED");
+      expect(findings[0].tier).toBe("critical");
+      expect(findings[0].table).toBe("public.secrets");
+    });
+
+    it("flags an unqualified table name the same way (implicit public search_path)", () => {
+      const { findings } = audit([file("supabase/migrations/0001.sql", ["create table secrets (id uuid primary key);"])]);
+
+      expect(findings.filter((f) => f.ruleId === "VIBE_PUBLIC_TABLE_RLS_DISABLED")).toHaveLength(1);
+    });
+
+    it("does not flag a table in a non-public schema with no evidence it is exposed", () => {
+      const { findings } = audit([file("supabase/migrations/0001.sql", ["create table private.secrets (id uuid primary key);"])]);
+
+      expect(findings.filter((f) => f.ruleId === "VIBE_PUBLIC_TABLE_RLS_DISABLED")).toHaveLength(0);
+    });
+
+    it("does not flag a table with RLS enabled and zero policies (the safe deny-all default)", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "create table public.secrets (id uuid primary key);",
+          "alter table public.secrets enable row level security;",
+        ]),
+      ]);
+
+      expect(findings.filter((f) => f.ruleId === "VIBE_PUBLIC_TABLE_RLS_DISABLED")).toHaveLength(0);
+    });
+
+    it("does not duplicate RLS_DISABLED_WITH_POLICIES when the table has policies", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "create table public.secrets (id uuid primary key);",
+          'create policy "p" on public.secrets for select to authenticated using (auth.uid() = id);',
+        ]),
+      ]);
+
+      expect(findings.filter((f) => f.ruleId === "VIBE_PUBLIC_TABLE_RLS_DISABLED")).toHaveLength(0);
+      expect(findings.filter((f) => f.ruleId === "RLS_DISABLED_WITH_POLICIES")).toHaveLength(1);
+    });
+
+    it("uses needs_review when the table's CREATE TABLE was not found in the scanned migrations", () => {
+      const { findings } = audit([file("supabase/migrations/0001.sql", ["alter table public.secrets disable row level security;"])]);
+
+      const finding = findings.find((f) => f.ruleId === "VIBE_PUBLIC_TABLE_RLS_DISABLED");
+      expect(finding).toBeDefined();
+      expect(finding?.tier).toBe("review");
+    });
+  });
+
+  describe("VIBE_ANON_ALLOW_ALL", () => {
+    it("flags an allow-all policy targeting anon as the more specific anon rule, not the generic one", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "alter table public.t enable row level security;",
+          'create policy "p" on public.t for select to anon using (true);',
+        ]),
+      ]);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].ruleId).toBe("VIBE_ANON_ALLOW_ALL");
+      expect(findings[0].tier).toBe("critical");
+    });
+
+    it("flags an allow-all policy with an omitted TO clause (defaults to PUBLIC)", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "alter table public.t enable row level security;",
+          'create policy "p" on public.t for select using (true);',
+        ]),
+      ]);
+
+      expect(findings.filter((f) => f.ruleId === "VIBE_ANON_ALLOW_ALL")).toHaveLength(1);
+    });
+
+    it("still uses the generic RLS_ALLOW_ALL for an authenticated-only allow-all policy", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "alter table public.t enable row level security;",
+          'create policy "p" on public.t for select to authenticated using (true);',
+        ]),
+      ]);
+
+      expect(findings.filter((f) => f.ruleId === "RLS_ALLOW_ALL")).toHaveLength(1);
+      expect(findings.filter((f) => f.ruleId === "VIBE_ANON_ALLOW_ALL")).toHaveLength(0);
+    });
+
+    it("flags an anon allow-all WITH CHECK on an INSERT policy", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "alter table public.t enable row level security;",
+          'create policy "p" on public.t for insert to anon with check (true);',
+        ]),
+      ]);
+
+      expect(findings.filter((f) => f.ruleId === "VIBE_ANON_ALLOW_ALL")).toHaveLength(1);
+    });
+  });
+
+  describe("VIBE_LOGIN_ONLY_POLICY", () => {
+    it("flags auth.uid() is not null as the entire policy", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "alter table public.t enable row level security;",
+          'create policy "p" on public.t for select to authenticated using (auth.uid() is not null);',
+        ]),
+      ]);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].ruleId).toBe("VIBE_LOGIN_ONLY_POLICY");
+      expect(findings[0].tier).toBe("high");
+    });
+
+    it("does not flag it when combined with a real ownership boundary", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "alter table public.t enable row level security;",
+          'create policy "p" on public.t for select to authenticated using (auth.uid() is not null and auth.uid() = owner_id);',
+        ]),
+      ]);
+
+      expect(findings.filter((f) => f.ruleId === "VIBE_LOGIN_ONLY_POLICY")).toHaveLength(0);
+    });
+  });
+
+  describe("VIBE_NON_NULL_OWNER_POLICY", () => {
+    it("flags a bare owner-column not-null check", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "alter table public.t enable row level security;",
+          'create policy "p" on public.t for select to authenticated using (trainer_id is not null);',
+        ]),
+      ]);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].ruleId).toBe("VIBE_NON_NULL_OWNER_POLICY");
+      expect(findings[0].tier).toBe("high");
+    });
+
+    it("does not flag a genuine ownership comparison", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "alter table public.t enable row level security;",
+          'create policy "p" on public.t for select to authenticated using (trainer_id = auth.uid());',
+        ]),
+      ]);
+
+      expect(findings.filter((f) => f.ruleId === "VIBE_NON_NULL_OWNER_POLICY")).toHaveLength(0);
+    });
+  });
+
+  describe("VIBE_USER_METADATA_AUTHORIZATION", () => {
+    it("flags a direct user-metadata authorization check as high tier", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "alter table public.t enable row level security;",
+          "create policy \"p\" on public.t for select to authenticated using ((auth.jwt() -> 'user_metadata' ->> 'is_admin')::boolean);",
+        ]),
+      ]);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].ruleId).toBe("VIBE_USER_METADATA_AUTHORIZATION");
+      expect(findings[0].tier).toBe("high");
+      expect(findings[0].confidence).toBe("high");
+    });
+
+    it("downgrades to needs_review when combined with other logic", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "alter table public.t enable row level security;",
+          "create policy \"p\" on public.t for select to authenticated using (auth.uid() = owner_id and (raw_user_meta_data ->> 'role') = 'admin');",
+        ]),
+      ]);
+
+      expect(findings.filter((f) => f.ruleId === "VIBE_USER_METADATA_AUTHORIZATION")).toHaveLength(1);
+      expect(findings.find((f) => f.ruleId === "VIBE_USER_METADATA_AUTHORIZATION")?.tier).toBe("review");
+    });
+
+    it("does not flag trusted app_metadata usage", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "alter table public.t enable row level security;",
+          "create policy \"p\" on public.t for select to authenticated using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');",
+        ]),
+      ]);
+
+      expect(findings.filter((f) => f.ruleId === "VIBE_USER_METADATA_AUTHORIZATION")).toHaveLength(0);
+    });
+  });
+
+  describe("VIBE_PERMISSIVE_POLICY_BROADENING", () => {
+    it("flags a narrow ownership policy undermined by a broader allow-all policy on the same table/operation/role", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "alter table public.t enable row level security;",
+          'create policy "owner_only" on public.t for select to authenticated using (auth.uid() = owner_id);',
+          'create policy "everyone" on public.t for select to authenticated using (true);',
+        ]),
+      ]);
+
+      const broadening = findings.find((f) => f.ruleId === "VIBE_PERMISSIVE_POLICY_BROADENING");
+      expect(broadening).toBeDefined();
+      expect(broadening?.tier).toBe("high");
+      expect(broadening?.table).toBe("public.t");
+    });
+
+    it("does not flag two narrow ownership policies that do not broaden each other", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "alter table public.t enable row level security;",
+          'create policy "owner_only" on public.t for select to authenticated using (auth.uid() = owner_id);',
+          'create policy "admin_only" on public.t for select to authenticated using (auth.uid() = admin_id);',
+        ]),
+      ]);
+
+      expect(findings.filter((f) => f.ruleId === "VIBE_PERMISSIVE_POLICY_BROADENING")).toHaveLength(0);
+    });
+
+    it("does not flag policies for non-overlapping operations", () => {
+      const { findings } = audit([
+        file("supabase/migrations/0001.sql", [
+          "alter table public.t enable row level security;",
+          'create policy "owner_select" on public.t for select to authenticated using (auth.uid() = owner_id);',
+          'create policy "public_delete" on public.t for delete to authenticated using (true);',
+        ]),
+      ]);
+
+      expect(findings.filter((f) => f.ruleId === "VIBE_PERMISSIVE_POLICY_BROADENING")).toHaveLength(0);
+    });
+  });
 });

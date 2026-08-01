@@ -33,11 +33,15 @@ describe("runAudit", () => {
     expect(report.coverage.policiesInspected).toBe(2);
     expect(report.coverage.tablesDiscovered).toBe(1);
     expect(report.coverage.criticalFindingCount).toBe(1);
+    expect(report.coverage.highRiskFindingCount).toBe(0);
     expect(report.coverage.needsReviewCount).toBe(0);
     expect(report.coverage.noIssueFoundCount).toBe(1);
     expect(report.coverage.aiReviewsPerformed).toBe(0);
     expect(report.findings).toHaveLength(1);
-    expect(report.findings[0].ruleId).toBe("RLS_ALLOW_ALL");
+    // "to public" defaults role exposure to PUBLIC, so this is the more
+    // specific anon/public-exposed classification, not the generic one.
+    expect(report.findings[0].ruleId).toBe("VIBE_ANON_ALLOW_ALL");
+    expect(report.findings[0].liveValidationAvailable).toBe(true);
     expect(report.durationMs).toBeGreaterThanOrEqual(0);
   });
 
@@ -69,5 +73,32 @@ describe("runAudit", () => {
     expect(report.coverage.policiesInspected).toBe(0);
     expect(report.coverage.criticalFindingCount).toBe(0);
     expect(report.coverage.needsReviewCount).toBe(0);
+  });
+
+  it("surfaces security-definer function and view findings end to end, without live validation available for them", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "");
+
+    const files: ScannedFile[] = [
+      file("supabase/migrations/0001.sql", [
+        "create table public.clients (id uuid primary key);",
+        "alter table public.clients enable row level security;",
+        'create policy "read_own" on public.clients for select to authenticated using (auth.uid() = trainer_id);',
+        "create function public.leak() returns setof public.clients language sql security definer as $$ select * from public.clients; $$;",
+        "create view public.client_view as select id from public.clients;",
+      ]),
+    ];
+
+    // isDemoRepository: true, but live validation only ever exercises
+    // public.clients directly — never a function or a view.
+    const report = await runAudit(REPOSITORY, true, files);
+
+    const fnFinding = report.findings.find((f) => f.ruleId === "VIBE_SECURITY_DEFINER_SEARCH_PATH");
+    expect(fnFinding).toBeDefined();
+    expect(fnFinding?.liveValidationAvailable).toBe(false);
+
+    const viewFinding = report.findings.find((f) => f.ruleId === "VIBE_SECURITY_DEFINER_VIEW");
+    expect(viewFinding).toBeDefined();
+    expect(viewFinding?.tier).toBe("high");
+    expect(viewFinding?.liveValidationAvailable).toBe(false);
   });
 });

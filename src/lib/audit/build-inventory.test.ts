@@ -62,4 +62,20 @@ describe("buildSchemaInventory", () => {
     ]);
     expect(inventory.statementsInspected).toBe(3);
   });
+
+  it("discovers functions and views alongside tables and policies", () => {
+    const inventory = buildSchemaInventory([
+      file("supabase/migrations/0001.sql", [
+        "create function public.f() returns int language sql security definer as $$ select 1; $$;",
+        "create view public.v as select id from public.clients;",
+      ]),
+    ]);
+
+    expect(inventory.functions).toHaveLength(1);
+    expect(inventory.functions[0].name).toBe("public.f");
+    expect(inventory.functions[0].securityDefiner).toBe(true);
+    expect(inventory.views).toHaveLength(1);
+    expect(inventory.views[0].name).toBe("public.v");
+    expect(inventory.views[0].referencedTables).toContain("public.clients");
+  });
 });
