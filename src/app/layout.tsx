@@ -57,7 +57,7 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body className="min-h-full bg-canvas font-sans text-fg">{children}</body>
+      <body className="flex min-h-full flex-col bg-canvas font-sans text-fg">{children}</body>
     </html>
   );
 }
