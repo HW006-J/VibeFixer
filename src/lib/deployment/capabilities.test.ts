@@ -78,3 +78,48 @@ describe("detectDeploymentCapabilities", () => {
     expect(result.reason).toBe("The Supabase CLI could not be found on this server.");
   });
 });
+
+describe("detectDeploymentCapabilities — opening pull requests", () => {
+  function stubDependencies() {
+    readDemoSupabaseConfigMock.mockReturnValue({ url: "x", anonKey: "y", attackerEmail: "a", attackerPassword: "b" });
+    isGeminiConfiguredMock.mockReturnValue(true);
+  }
+
+  it("reports pullRequest available when a GitHub token is configured", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("GITHUB_TOKEN", "ghp_example_token");
+    stubDependencies();
+
+    const { detectDeploymentCapabilities } = await import("./capabilities");
+    const result = await detectDeploymentCapabilities();
+
+    expect(result.pullRequest).toBe(true);
+  });
+
+  it("reports pullRequest unavailable when no GitHub token is configured", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("GITHUB_TOKEN", "");
+    stubDependencies();
+
+    const { detectDeploymentCapabilities } = await import("./capabilities");
+    const result = await detectDeploymentCapabilities();
+
+    expect(result.pullRequest).toBe(false);
+  });
+
+  it("offers pull requests on Vercel even though database mutation is impossible there", async () => {
+    // Opening a pull request is plain HTTPS to the GitHub API — it has none
+    // of the CLI/filesystem dependencies that make apply and reset
+    // impossible on serverless. The two capabilities are independent.
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("GITHUB_TOKEN", "ghp_example_token");
+    stubDependencies();
+
+    const { detectDeploymentCapabilities } = await import("./capabilities");
+    const result = await detectDeploymentCapabilities();
+
+    expect(result.databaseMutation).toBe(false);
+    expect(result.pullRequest).toBe(true);
+    expect(checkMutationReadinessMock).not.toHaveBeenCalled();
+  });
+});

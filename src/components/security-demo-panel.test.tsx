@@ -436,3 +436,68 @@ describe("SecurityDemoPanel — opening a pull request", () => {
     expect(screen.getByText(/repair verified/i)).toBeTruthy();
   });
 });
+
+const VERCEL_CAPABILITIES = {
+  ...FULL_CAPABILITIES,
+  databaseMutation: false,
+  demoReset: false,
+  pullRequest: true,
+  reason:
+    "Policy apply and demo reset require the authenticated local Supabase CLI and a linked project directory, which are not available in this serverless deployment.",
+};
+
+/**
+ * On a serverless deployment the database cannot be mutated, but the leak is
+ * still proven live and the fix can still be offered back to the repository.
+ * The human-approval step moves from "approve and apply" to "approve and
+ * open a pull request" — the consent is just as explicit.
+ */
+describe("SecurityDemoPanel — opening a pull request without database mutation", () => {
+  const vercelQueues = {
+    liveState: [VULNERABLE_STATE],
+    liveValidate: [VALIDATE_VULNERABLE],
+    propose: [PROPOSAL],
+    capabilities: [VERCEL_CAPABILITIES],
+  };
+
+  async function reachProposal() {
+    render(<SecurityDemoPanel repositoryUrl={REPO_URL} refreshToken={1} sourceState="finding_present" />);
+    fireEvent.click(await screen.findByRole("button", { name: /run live validation/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /ask gemini to design repair/i }));
+  }
+
+  it("offers to open a pull request when the database cannot be mutated", async () => {
+    mockFetch(vercelQueues);
+    await reachProposal();
+
+    expect(await screen.findByRole("button", { name: /approve and open pull request/i })).toBeTruthy();
+    // Applying is genuinely impossible here and must not be offered.
+    expect(screen.queryByRole("button", { name: /approve and apply repair/i })).toBeNull();
+  });
+
+  it("still explains why applying is unavailable", async () => {
+    mockFetch(vercelQueues);
+    await reachProposal();
+
+    await screen.findByRole("button", { name: /approve and open pull request/i });
+    expect(screen.getByText(/not available in this serverless deployment/i)).toBeTruthy();
+  });
+
+  it("shows the real pull request link after approval", async () => {
+    mockFetch({ ...vercelQueues, openPr: [OPEN_PR_SUCCESS] });
+    await reachProposal();
+
+    fireEvent.click(await screen.findByRole("button", { name: /approve and open pull request/i }));
+
+    const link = (await screen.findByRole("link", { name: /pull request/i })) as HTMLAnchorElement;
+    expect(link.href).toBe(OPEN_PR_SUCCESS.pullRequestUrl);
+  });
+
+  it("offers nothing when no GitHub token is configured either", async () => {
+    mockFetch({ ...vercelQueues, capabilities: [{ ...VERCEL_CAPABILITIES, pullRequest: false }] });
+    await reachProposal();
+
+    await screen.findByText(/not available in this serverless deployment/i);
+    expect(screen.queryByRole("button", { name: /approve and open pull request/i })).toBeNull();
+  });
+});

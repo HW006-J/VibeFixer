@@ -19,6 +19,7 @@ const LOADING_CAPABILITIES: DeploymentCapabilities = {
   geminiAnalysis: true,
   databaseMutation: false,
   demoReset: false,
+  pullRequest: false,
   reason: null,
 };
 
@@ -54,19 +55,17 @@ type ActionKind =
   | "error";
 
 /**
- * Every piece of session data (proposal, evidence, verification result) is
- * scoped to `key` (repositoryUrl::refreshToken). When `key` no longer
- * matches the current key, the record is treated as absent rather than
- * shown — this is what guarantees a rescan or a fresh mount can never
- * display state left over from a previous check, without needing any
- * imperative "clear" call in the fetch effect itself.
- */
-/**
- * Opening a pull request is an optional step that happens *after* the
- * repair is already applied and proven. It is tracked separately from
- * `action` so that a failure here — a missing token, GitHub being
- * unreachable — cannot disturb or erase the verified result the user just
- * watched being proven.
+ * Opening a pull request is an optional step, tracked separately from
+ * `action` rather than added to it. Two reasons:
+ *
+ *   - Where the database can be mutated, this runs after the repair is
+ *     already proven, and a GitHub failure must not disturb or erase the
+ *     verified result the user just watched.
+ *   - Where it cannot (serverless), this *is* the approval step, reached
+ *     straight from a valid proposal without any apply having happened.
+ *
+ * Keeping it out of the action machine lets both paths share one piece of
+ * state without either being able to corrupt the other.
  */
 type OpenPrState = {
   status: "idle" | "opening" | "opened" | "error";
@@ -74,6 +73,14 @@ type OpenPrState = {
   message: string | null;
 };
 
+/**
+ * Every piece of session data (proposal, evidence, verification result) is
+ * scoped to `key` (repositoryUrl::refreshToken). When `key` no longer
+ * matches the current key, the record is treated as absent rather than
+ * shown — this is what guarantees a rescan or a fresh mount can never
+ * display state left over from a previous check, without needing any
+ * imperative "clear" call in the fetch effect itself.
+ */
 type SessionState = {
   key: string;
   action: ActionKind;
@@ -421,6 +428,7 @@ export function SecurityDemoPanel({
           onValidate={runValidate}
           onPropose={runPropose}
           onApply={runApply}
+          onOpenPr={runOpenPr}
         />
       )}
 
@@ -515,12 +523,14 @@ function VulnerableCard({
   onValidate,
   onPropose,
   onApply,
+  onOpenPr,
 }: {
   session: SessionState;
   capabilities: DeploymentCapabilities;
   onValidate: () => void;
   onPropose: () => void;
   onApply: () => void;
+  onOpenPr: () => void;
 }) {
   const { action, evidence, proposal, errorMessage } = session;
 
@@ -589,7 +599,7 @@ function VulnerableCard({
         </div>
       )}
 
-      <div className="mt-4">{renderVulnerablePrimaryAction(session, capabilities, onValidate, onPropose, onApply)}</div>
+      <div className="mt-4">{renderVulnerablePrimaryAction(session, capabilities, onValidate, onPropose, onApply, onOpenPr)}</div>
     </div>
   );
 }
@@ -600,6 +610,7 @@ function renderVulnerablePrimaryAction(
   onValidate: () => void,
   onPropose: () => void,
   onApply: () => void,
+  onOpenPr: () => void,
 ) {
   const { action, evidence, proposal } = session;
 
@@ -635,10 +646,48 @@ function renderVulnerablePrimaryAction(
   }
 
   if (!capabilities.databaseMutation) {
+    // The database cannot be written here, but the leak has still been
+    // proven live and the fix can still be offered back to the repository.
+    // Approval moves from "apply" to "open a pull request" — the human
+    // consent is just as explicit, and nothing is claimed to have been
+    // fixed that wasn't.
     return (
-      <p className="text-xs text-amber-300">
-        {capabilities.reason ?? "Applying this repair is not available in this deployment."}
-      </p>
+      <div className="flex flex-col gap-2">
+        <p className="text-xs text-amber-300">
+          {capabilities.reason ?? "Applying this repair is not available in this deployment."}
+        </p>
+
+        {capabilities.pullRequest &&
+          (session.openPr.status === "opened" && session.openPr.url ? (
+            <p className="text-sm text-emerald-200">
+              Pull request opened:{" "}
+              <a
+                href={session.openPr.url}
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold underline underline-offset-2 hover:text-white"
+              >
+                view the pull request on GitHub
+              </a>
+            </p>
+          ) : session.openPr.status === "opening" ? (
+            <Spinner label="Opening pull request…" />
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenPr}
+              className={`self-start bg-emerald-600 hover:bg-emerald-500 focus-visible:ring-emerald-400 ${primaryButtonClasses}`}
+            >
+              Approve and open pull request
+            </button>
+          ))}
+
+        {session.openPr.status === "error" && session.openPr.message && (
+          <p role="alert" className="text-xs text-amber-300">
+            {session.openPr.message}
+          </p>
+        )}
+      </div>
     );
   }
 
