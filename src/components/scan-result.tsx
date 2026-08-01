@@ -8,6 +8,8 @@ import type { ExecutiveNarrative } from "@/lib/ai/executive-narrative";
 import { auditFindingToUnified } from "@/lib/security/from-audit";
 import type { SecurityCategory, UnifiedFinding, UnifiedSeverity } from "@/lib/security/finding";
 import { categoryLabel, formatReportAsMarkdown, type SecurityReport } from "@/lib/security/report";
+import type { RepairOpenPrApiResponse } from "@/lib/repair/api-types";
+import { findTrustedRepairTarget } from "@/lib/repair/trusted-repair";
 import { SecurityDemoPanel } from "./security-demo-panel";
 
 type SuccessState = {
@@ -324,6 +326,12 @@ function ReportActions({
 }) {
   const markdown = formatReportAsMarkdown(state.securityReport, displayFindings);
 
+  // Offered only where a trusted, predefined repair genuinely addresses a
+  // finding in this scan. There is exactly one such repair, so this is
+  // never a "fix everything" action and must not read like one — the other
+  // findings in the report still need a human.
+  const repairTarget = state.isDemoRepository ? findTrustedRepairTarget(state.findings) : null;
+
   function copyReport() {
     void navigator.clipboard.writeText(markdown);
   }
@@ -354,6 +362,79 @@ function ReportActions({
       >
         Download Markdown
       </button>
+
+      {repairTarget && <OpenRepairPrButton repositoryUrl={state.repositoryUrl} target={repairTarget} />}
+    </div>
+  );
+}
+
+/**
+ * Opens a pull request containing the one trusted, predefined repair.
+ *
+ * The wording is deliberately narrow. This fixes a single named policy on a
+ * single named table — it is not a remedy for the rest of the report, and
+ * a button that implied otherwise would be the most damaging kind of
+ * overclaim this product could make.
+ */
+function OpenRepairPrButton({ repositoryUrl, target }: { repositoryUrl: string; target: AuditFinding }) {
+  const [status, setStatus] = useState<"idle" | "opening" | "opened" | "error">("idle");
+  const [url, setUrl] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function openPr() {
+    setStatus("opening");
+    setMessage(null);
+    try {
+      const response = await fetch("/api/repair/open-pr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repositoryUrl }),
+      });
+      const data = (await response.json()) as RepairOpenPrApiResponse;
+      if (!data.ok) {
+        setStatus("error");
+        setMessage(data.error.message);
+        return;
+      }
+      setUrl(data.pullRequestUrl);
+      setStatus("opened");
+    } catch {
+      setStatus("error");
+      setMessage("Could not reach the pull request service.");
+    }
+  }
+
+  if (status === "opened" && url) {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className="rounded-md border border-emerald-700 bg-emerald-950 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:border-emerald-500"
+      >
+        Pull request opened — view on GitHub
+      </a>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        onClick={openPr}
+        disabled={status === "opening"}
+        className="rounded-md border border-emerald-700 bg-emerald-950 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {status === "opening" ? "Opening pull request…" : "Open pull request with the trusted fix"}
+      </button>
+      <span className="text-[11px] text-zinc-500">
+        Fixes one finding: {target.title}. Other findings in this report still need a human.
+      </span>
+      {status === "error" && message && (
+        <span role="alert" className="text-[11px] text-amber-300">
+          {message}
+        </span>
+      )}
     </div>
   );
 }

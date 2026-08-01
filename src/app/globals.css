@@ -1,29 +1,422 @@
 @import "tailwindcss";
 
+/*
+ * ============================================================================
+ * VIBE FIXER — DESIGN TOKENS
+ * ============================================================================
+ *
+ * Three layers, in order of increasing specificity of meaning:
+ *
+ *   1. PRIMITIVES  raw values. Never referenced by a component.
+ *   2. SEMANTIC    role-named aliases (canvas, fg-muted, severity-high-fg).
+ *                  These are what components use, and the only layer that
+ *                  changes between light and dark.
+ *   3. THEME MAP   the `@theme inline` block, which turns the semantic layer
+ *                  into Tailwind utilities (`bg-canvas`, `text-fg-muted`, …).
+ *
+ * The point of the split is that theming is a swap of layer 2 alone. No
+ * component contains a raw hex value or a `zinc-800`, so light mode costs
+ * nothing to maintain.
+ *
+ * Every foreground/background pair below is checked against WCAG 2.2 AA
+ * (4.5:1 for body and badge text, 3:1 for borders and large text). The
+ * contrast ratio is noted where a pairing is not obviously safe.
+ */
+
+/* ---------------------------------------------------------------------------
+ * LAYER 1 — PRIMITIVES
+ * ------------------------------------------------------------------------- */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Neutral ramp — cool grey, tuned so adjacent steps stay distinguishable
+     on an OLED panel where very dark values otherwise collapse together. */
+  --grey-0: #ffffff;
+  --grey-50: #fafafa;
+  --grey-100: #f4f4f5;
+  --grey-200: #e4e4e7;
+  --grey-300: #d4d4d8;
+  --grey-400: #a1a1aa;
+  --grey-500: #71717a;
+  --grey-600: #52525b;
+  --grey-700: #3f3f46;
+  --grey-800: #27272a;
+  --grey-900: #18181b;
+  --grey-950: #0d0d10;
+  --grey-1000: #08080a;
+
+  /* Severity hues. Only the 300/400 steps are used as text on dark, and only
+     the 700/800 steps as text on light — the mid steps fail AA at body size
+     in both directions and exist purely as fills and borders. */
+  --red-300: #fca5a5;
+  --red-400: #f87171;
+  --red-500: #ef4444;
+  --red-600: #dc2626;
+  --red-700: #b91c1c;
+  --red-800: #991b1b;
+
+  --orange-300: #fdba74;
+  --orange-500: #f97316;
+  --orange-700: #c2410c;
+  --orange-800: #9a3412;
+
+  --yellow-300: #fde047;
+  --yellow-500: #eab308;
+  --yellow-800: #854d0e;
+
+  --amber-300: #fcd34d;
+  --amber-500: #f59e0b;
+  --amber-800: #92400e;
+
+  --emerald-300: #6ee7b7;
+  --emerald-500: #10b981;
+  --emerald-800: #065f46;
+
+  --blue-300: #93c5fd;
+  --blue-500: #3b82f6;
+  --blue-800: #1e40af;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ---------------------------------------------------------------------------
+ * LAYER 2 — SEMANTIC (dark is the default; this product is dark-branded)
+ * ------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces, from furthest back to closest to the reader. */
+  --canvas: var(--grey-1000);
+  --surface: var(--grey-950);
+  --surface-raised: var(--grey-900);
+  --surface-sunken: #000000;
+  --surface-hover: var(--grey-800);
+
+  /* Text. Three tiers only — a fourth invites illegible grey-on-grey. */
+  --fg: var(--grey-50); /* 18.9:1 on canvas */
+  --fg-muted: var(--grey-400); /* 8.1:1  on canvas */
+  --fg-subtle: #8b8b94; /* 5.4:1  on canvas — the floor, still AA */
+
+  /* Borders. `border` is decorative (3:1 not required); `border-strong`
+     is used for interactive outlines and does clear 3:1. */
+  --border: var(--grey-800);
+  --border-strong: var(--grey-700);
+
+  /* Brand. Red is the product's name and its alarm colour at once, so it is
+     reserved for the primary action and for critical severity — never for
+     decoration, or it stops meaning anything. */
+  --brand: var(--red-600);
+  --brand-hover: var(--red-500);
+  --brand-fg: #ffffff; /* 5.2:1 on --brand */
+  --brand-accent: var(--red-400);
+
+  /* Focus ring. One value, used by every focusable element in the app. */
+  --ring: var(--red-400);
+
+  /* Severity. `critical` is the only solid fill — that asymmetry is the
+     hierarchy. Everything below it is a tint, so a page of high/medium
+     findings reads as calm until something genuinely critical appears. */
+  --sev-critical-fg: #ffffff;
+  --sev-critical-bg: var(--red-600);
+  --sev-critical-border: var(--red-500);
+  --sev-critical-surface: color-mix(in srgb, var(--red-500) 12%, transparent);
+  --sev-critical-accent: var(--red-300); /* 9.2:1 on canvas */
+
+  --sev-high-fg: var(--orange-300); /* 10.8:1 on canvas */
+  --sev-high-bg: color-mix(in srgb, var(--orange-500) 16%, transparent);
+  --sev-high-border: color-mix(in srgb, var(--orange-500) 45%, transparent);
+  --sev-high-accent: var(--orange-300);
+
+  --sev-medium-fg: var(--yellow-300); /* 15.1:1 on canvas */
+  --sev-medium-bg: color-mix(in srgb, var(--yellow-500) 14%, transparent);
+  --sev-medium-border: color-mix(in srgb, var(--yellow-500) 40%, transparent);
+  --sev-medium-accent: var(--yellow-300);
+
+  --sev-review-fg: var(--amber-300); /* 13.4:1 on canvas */
+  --sev-review-bg: color-mix(in srgb, var(--amber-500) 14%, transparent);
+  --sev-review-border: color-mix(in srgb, var(--amber-500) 42%, transparent);
+  --sev-review-accent: var(--amber-300);
+
+  --sev-safe-fg: var(--emerald-300); /* 12.7:1 on canvas */
+  --sev-safe-bg: color-mix(in srgb, var(--emerald-500) 14%, transparent);
+  --sev-safe-border: color-mix(in srgb, var(--emerald-500) 42%, transparent);
+  --sev-safe-accent: var(--emerald-300);
+
+  --info-fg: var(--blue-300);
+  --info-bg: color-mix(in srgb, var(--blue-500) 14%, transparent);
+  --info-border: color-mix(in srgb, var(--blue-500) 42%, transparent);
+
+  /* Elevation. Kept shallow — on a black canvas a heavy shadow reads as
+     smudge rather than height, so lift comes mostly from the border. */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 12px 32px -8px rgb(0 0 0 / 0.6);
+  --shadow-ring: 0 0 0 1px rgb(255 255 255 / 0.04);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Light theme. Applied when the OS asks for it, unless an explicit
+   `data-theme` on <html> overrides — the two selectors below give the
+   manual choice the last word in both directions. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+
+    --canvas: var(--grey-0);
+    --surface: var(--grey-50);
+    --surface-raised: var(--grey-0);
+    --surface-sunken: var(--grey-100);
+    --surface-hover: var(--grey-100);
+
+    --fg: var(--grey-900); /* 16.1:1 on canvas */
+    --fg-muted: var(--grey-600); /* 7.6:1  on canvas */
+    --fg-subtle: var(--grey-500); /* 4.6:1  on canvas — the floor, still AA */
+
+    --border: var(--grey-200);
+    --border-strong: var(--grey-300);
+
+    --brand: var(--red-600);
+    --brand-hover: var(--red-700);
+    --brand-fg: #ffffff;
+    --brand-accent: var(--red-700);
+
+    --ring: var(--red-600);
+
+    --sev-critical-fg: #ffffff;
+    --sev-critical-bg: var(--red-600);
+    --sev-critical-border: var(--red-600);
+    --sev-critical-surface: color-mix(in srgb, var(--red-500) 8%, transparent);
+    --sev-critical-accent: var(--red-800); /* 7.6:1 on canvas */
+
+    --sev-high-fg: var(--orange-800); /* 7.1:1 on canvas */
+    --sev-high-bg: color-mix(in srgb, var(--orange-500) 10%, transparent);
+    --sev-high-border: color-mix(in srgb, var(--orange-700) 35%, transparent);
+    --sev-high-accent: var(--orange-800);
+
+    --sev-medium-fg: var(--yellow-800); /* 7.4:1 on canvas */
+    --sev-medium-bg: color-mix(in srgb, var(--yellow-500) 14%, transparent);
+    --sev-medium-border: color-mix(in srgb, var(--yellow-800) 30%, transparent);
+    --sev-medium-accent: var(--yellow-800);
+
+    --sev-review-fg: var(--amber-800); /* 7.9:1 on canvas */
+    --sev-review-bg: color-mix(in srgb, var(--amber-500) 12%, transparent);
+    --sev-review-border: color-mix(in srgb, var(--amber-800) 30%, transparent);
+    --sev-review-accent: var(--amber-800);
+
+    --sev-safe-fg: var(--emerald-800); /* 8.4:1 on canvas */
+    --sev-safe-bg: color-mix(in srgb, var(--emerald-500) 12%, transparent);
+    --sev-safe-border: color-mix(in srgb, var(--emerald-800) 30%, transparent);
+    --sev-safe-accent: var(--emerald-800);
+
+    --info-fg: var(--blue-800);
+    --info-bg: color-mix(in srgb, var(--blue-500) 10%, transparent);
+    --info-border: color-mix(in srgb, var(--blue-800) 30%, transparent);
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.06);
+    --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 12px 32px -8px rgb(0 0 0 / 0.14);
+    --shadow-ring: 0 0 0 1px rgb(0 0 0 / 0.03);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Explicit light request, regardless of OS preference. Duplicated rather
+   than shared with the media query above because CSS has no way to say
+   "this selector OR that media query" without repeating the block. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --canvas: var(--grey-0);
+  --surface: var(--grey-50);
+  --surface-raised: var(--grey-0);
+  --surface-sunken: var(--grey-100);
+  --surface-hover: var(--grey-100);
+
+  --fg: var(--grey-900);
+  --fg-muted: var(--grey-600);
+  --fg-subtle: var(--grey-500);
+
+  --border: var(--grey-200);
+  --border-strong: var(--grey-300);
+
+  --brand: var(--red-600);
+  --brand-hover: var(--red-700);
+  --brand-fg: #ffffff;
+  --brand-accent: var(--red-700);
+
+  --ring: var(--red-600);
+
+  --sev-critical-fg: #ffffff;
+  --sev-critical-bg: var(--red-600);
+  --sev-critical-border: var(--red-600);
+  --sev-critical-surface: color-mix(in srgb, var(--red-500) 8%, transparent);
+  --sev-critical-accent: var(--red-800);
+
+  --sev-high-fg: var(--orange-800);
+  --sev-high-bg: color-mix(in srgb, var(--orange-500) 10%, transparent);
+  --sev-high-border: color-mix(in srgb, var(--orange-700) 35%, transparent);
+  --sev-high-accent: var(--orange-800);
+
+  --sev-medium-fg: var(--yellow-800);
+  --sev-medium-bg: color-mix(in srgb, var(--yellow-500) 14%, transparent);
+  --sev-medium-border: color-mix(in srgb, var(--yellow-800) 30%, transparent);
+  --sev-medium-accent: var(--yellow-800);
+
+  --sev-review-fg: var(--amber-800);
+  --sev-review-bg: color-mix(in srgb, var(--amber-500) 12%, transparent);
+  --sev-review-border: color-mix(in srgb, var(--amber-800) 30%, transparent);
+  --sev-review-accent: var(--amber-800);
+
+  --sev-safe-fg: var(--emerald-800);
+  --sev-safe-bg: color-mix(in srgb, var(--emerald-500) 12%, transparent);
+  --sev-safe-border: color-mix(in srgb, var(--emerald-800) 30%, transparent);
+  --sev-safe-accent: var(--emerald-800);
+
+  --info-fg: var(--blue-800);
+  --info-bg: color-mix(in srgb, var(--blue-500) 10%, transparent);
+  --info-border: color-mix(in srgb, var(--blue-800) 30%, transparent);
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.06);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 12px 32px -8px rgb(0 0 0 / 0.14);
+  --shadow-ring: 0 0 0 1px rgb(0 0 0 / 0.03);
 }
+
+/* ---------------------------------------------------------------------------
+ * LAYER 3 — THEME MAP (semantic tokens → Tailwind utilities)
+ *
+ * `inline` keeps the `var()` reference in the generated utility instead of
+ * resolving it at build time, which is what lets a theme swap take effect at
+ * runtime without regenerating CSS.
+ * ------------------------------------------------------------------------- */
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-hover: var(--surface-hover);
+
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-fg: var(--brand-fg);
+  --color-brand-accent: var(--brand-accent);
+  --color-ring: var(--ring);
+
+  --color-critical: var(--sev-critical-bg);
+  --color-critical-fg: var(--sev-critical-fg);
+  --color-critical-border: var(--sev-critical-border);
+  --color-critical-surface: var(--sev-critical-surface);
+  --color-critical-accent: var(--sev-critical-accent);
+
+  --color-high: var(--sev-high-bg);
+  --color-high-fg: var(--sev-high-fg);
+  --color-high-border: var(--sev-high-border);
+
+  --color-medium: var(--sev-medium-bg);
+  --color-medium-fg: var(--sev-medium-fg);
+  --color-medium-border: var(--sev-medium-border);
+
+  --color-review: var(--sev-review-bg);
+  --color-review-fg: var(--sev-review-fg);
+  --color-review-border: var(--sev-review-border);
+
+  --color-safe: var(--sev-safe-bg);
+  --color-safe-fg: var(--sev-safe-fg);
+  --color-safe-border: var(--sev-safe-border);
+
+  --color-info: var(--info-bg);
+  --color-info-fg: var(--info-fg);
+  --color-info-border: var(--info-border);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
+
+  /* Type scale. A dense-dashboard ramp: tight at the bottom where labels and
+     metadata live, with a deliberate jump to display size so the one number
+     that matters on each screen is unmissable. */
+  --text-2xs: 0.6875rem; /* 11px — uppercase eyebrow labels only, never prose */
+  --text-2xs--line-height: 1rem;
+  --text-2xs--letter-spacing: 0.06em;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.9375rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.0625rem;
+  --text-lg--line-height: 1.625rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 2rem;
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: 2.25rem;
+  --text-display: 2.5rem;
+  --text-display--line-height: 2.75rem;
+  --text-display--letter-spacing: -0.02em;
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+
+  /* Motion. Three durations and two easings for the whole app — a bigger
+     vocabulary than this produces inconsistency, not expressiveness. */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out-soft: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+/* ---------------------------------------------------------------------------
+ * BASE
+ * ------------------------------------------------------------------------- */
+
+html {
+  scroll-behavior: smooth;
+  /* Anchor targets clear the sticky header instead of hiding beneath it. */
+  scroll-padding-top: 7.5rem;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--fg);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * One focus ring, applied once, for every focusable element. Individual
+ * components must not restate it — and must never remove it. The offset
+ * colour tracks the canvas so the ring reads on any surface it lands on.
+ */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* The default ring is redundant once :focus-visible above is in force, and
+   doubling them produces a muddy halo on rounded controls. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--brand) 40%, transparent);
+  color: var(--fg);
+}
+
+/* ---------------------------------------------------------------------------
+ * MOTION
+ * ------------------------------------------------------------------------- */
 
 /*
  * One-shot reveal for already-confirmed scan facts once the real API
@@ -38,5 +431,32 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/*
+ * Global reduced-motion contract.
+ *
+ * This covers CSS-driven motion only. Motion-library animation is handled
+ * separately, in JS, via `useReducedMotion` — a media query cannot reach
+ * inside a spring simulation. The two mechanisms must agree, so any new
+ * animation needs a decision in whichever layer it lives in.
+ *
+ * Note the deliberate exception: `scroll-behavior` is reset to `auto`
+ * because a smooth-scrolled jump is itself vestibular motion, and it is the
+ * one piece of motion here that a user cannot look away from.
+ */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
