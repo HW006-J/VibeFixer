@@ -70,3 +70,17 @@ export type RepairPreflightResponse = {
 };
 
 export type RepairPreflightApiResponse = RepairPreflightResponse | RepairErrorResponse;
+
+export type RepairOpenPrSuccessResponse = {
+  ok: true;
+  repository: string;
+  /** The real URL GitHub returned for the pull request that was opened. Never constructed locally. */
+  pullRequestUrl: string;
+  branch: string;
+  /** The migration file the pull request adds. */
+  filePath: string;
+  /** The expression committed — always the fixed trusted repair, never model output. */
+  committedExpression: string;
+};
+
+export type RepairOpenPrApiResponse = RepairOpenPrSuccessResponse | RepairErrorResponse;

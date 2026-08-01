@@ -91,6 +91,15 @@ function jsonResponse(body: unknown): Promise<Response> {
   return Promise.resolve({ json: () => Promise.resolve(body) } as unknown as Response);
 }
 
+const OPEN_PR_SUCCESS = {
+  ok: true,
+  repository: "x",
+  pullRequestUrl: "https://github.com/HW006-J/rls-red-alert-demo-target/pull/7",
+  branch: "rls-red-alert/fix-clients-rls-20260801150000",
+  filePath: "supabase/migrations/20260801150000_fix_clients_rls_policy.sql",
+  committedExpression: "auth.uid() = trainer_id",
+};
+
 type Queues = {
   liveState?: unknown[];
   liveValidate?: unknown[];
@@ -98,6 +107,7 @@ type Queues = {
   apply?: unknown[];
   reset?: unknown[];
   capabilities?: unknown[];
+  openPr?: unknown[];
 };
 
 function mockFetch(queues: Queues) {
@@ -114,6 +124,7 @@ function mockFetch(queues: Queues) {
     if (url.includes("/api/live-validate")) return jsonResponse(next("liveValidate", undefined));
     if (url.includes("/api/repair/propose")) return jsonResponse(next("propose", undefined));
     if (url.includes("/api/repair/apply")) return jsonResponse(next("apply", undefined));
+    if (url.includes("/api/repair/open-pr")) return jsonResponse(next("openPr", undefined));
     if (url.includes("/api/repair/reset")) return jsonResponse(next("reset", undefined));
     // Defaults to fully-available capabilities (matching localhost) unless a test overrides it.
     if (url.includes("/api/deployment-capabilities")) return jsonResponse(next("capabilities", FULL_CAPABILITIES));
@@ -350,5 +361,78 @@ describe("SecurityDemoPanel", () => {
 
     await screen.findByText(/live database vulnerable/i);
     expect(onLiveEvidence).toHaveBeenLastCalledWith({ totalRowsReturned: 4, ownRowCount: 2, leakedRowCount: 2 });
+  });
+});
+
+describe("SecurityDemoPanel — opening a pull request", () => {
+  it("does not offer to open a pull request before a human has approved a repair", async () => {
+    // The database is already protected, but nothing was approved in this
+    // session. Offering the button here would let the demo open a PR for a
+    // fix nobody agreed to.
+    mockFetch({ liveState: [PROTECTED_STATE] });
+    render(<SecurityDemoPanel repositoryUrl={REPO_URL} refreshToken={1} sourceState="finding_present" />);
+
+    await screen.findByText(/live database protected/i);
+    expect(screen.queryByRole("button", { name: /open pull request/i })).toBeNull();
+  });
+
+  it("offers to open a pull request once the repair is applied and verified", async () => {
+    mockFetch({
+      liveState: [VULNERABLE_STATE, PROTECTED_STATE],
+      liveValidate: [VALIDATE_VULNERABLE, VALIDATE_PROTECTED],
+      propose: [PROPOSAL],
+      apply: [APPLY_SUCCESS],
+    });
+    render(<SecurityDemoPanel repositoryUrl={REPO_URL} refreshToken={1} sourceState="finding_present" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /run live validation/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /ask gemini to design repair/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /approve and apply repair/i }));
+
+    await screen.findByText(/repair verified/i);
+    expect(screen.getByRole("button", { name: /open pull request/i })).toBeTruthy();
+  });
+
+  it("shows the real pull request link GitHub returned", async () => {
+    mockFetch({
+      liveState: [VULNERABLE_STATE, PROTECTED_STATE],
+      liveValidate: [VALIDATE_VULNERABLE, VALIDATE_PROTECTED],
+      propose: [PROPOSAL],
+      apply: [APPLY_SUCCESS],
+      openPr: [OPEN_PR_SUCCESS],
+    });
+    render(<SecurityDemoPanel repositoryUrl={REPO_URL} refreshToken={1} sourceState="finding_present" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /run live validation/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /ask gemini to design repair/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /approve and apply repair/i }));
+    await screen.findByText(/repair verified/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /open pull request/i }));
+
+    const link = (await screen.findByRole("link", { name: /pull request/i })) as HTMLAnchorElement;
+    expect(link.href).toBe(OPEN_PR_SUCCESS.pullRequestUrl);
+  });
+
+  it("reports a missing token as a configuration gap without breaking the verified result", async () => {
+    mockFetch({
+      liveState: [VULNERABLE_STATE, PROTECTED_STATE],
+      liveValidate: [VALIDATE_VULNERABLE, VALIDATE_PROTECTED],
+      propose: [PROPOSAL],
+      apply: [APPLY_SUCCESS],
+      openPr: [{ ok: false, error: { code: "TOKEN_MISSING", message: "No GitHub token is configured on the server." } }],
+    });
+    render(<SecurityDemoPanel repositoryUrl={REPO_URL} refreshToken={1} sourceState="finding_present" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /run live validation/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /ask gemini to design repair/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /approve and apply repair/i }));
+    await screen.findByText(/repair verified/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /open pull request/i }));
+
+    expect(await screen.findByText(/no github token is configured/i)).toBeTruthy();
+    // The proven result must survive a failure in an unrelated optional step.
+    expect(screen.getByText(/repair verified/i)).toBeTruthy();
   });
 });

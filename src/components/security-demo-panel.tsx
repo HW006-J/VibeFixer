@@ -6,6 +6,7 @@ import type { DeploymentCapabilitiesResponse } from "@/lib/deployment/api-types"
 import type {
   LiveStateApiResponse,
   RepairApplyApiResponse,
+  RepairOpenPrApiResponse,
   RepairProposeApiResponse,
   RepairResetApiResponse,
 } from "@/lib/repair/api-types";
@@ -60,6 +61,19 @@ type ActionKind =
  * display state left over from a previous check, without needing any
  * imperative "clear" call in the fetch effect itself.
  */
+/**
+ * Opening a pull request is an optional step that happens *after* the
+ * repair is already applied and proven. It is tracked separately from
+ * `action` so that a failure here — a missing token, GitHub being
+ * unreachable — cannot disturb or erase the verified result the user just
+ * watched being proven.
+ */
+type OpenPrState = {
+  status: "idle" | "opening" | "opened" | "error";
+  url: string | null;
+  message: string | null;
+};
+
 type SessionState = {
   key: string;
   action: ActionKind;
@@ -68,6 +82,7 @@ type SessionState = {
   proposal: ProposalDetail | null;
   verifiedBefore: Counts | null;
   verifiedAfter: Counts | null;
+  openPr: OpenPrState;
 };
 
 function idleSession(key: string): SessionState {
@@ -79,6 +94,7 @@ function idleSession(key: string): SessionState {
     proposal: null,
     verifiedBefore: null,
     verifiedAfter: null,
+    openPr: { status: "idle", url: null, message: null },
   };
 }
 
@@ -313,6 +329,28 @@ export function SecurityDemoPanel({
     }
   }
 
+  /**
+   * Offers the same fix back to the repository as a real pull request.
+   * Deliberately never touches `action`: this runs after the repair is
+   * already proven, and a GitHub failure must not undo what the user just
+   * watched being verified.
+   */
+  async function runOpenPr() {
+    patchSession({ openPr: { status: "opening", url: null, message: null } });
+    try {
+      const data = await postJson<RepairOpenPrApiResponse>("/api/repair/open-pr", repositoryUrl);
+      if (!data.ok) {
+        patchSession({ openPr: { status: "error", url: null, message: data.error.message } });
+        return;
+      }
+      patchSession({ openPr: { status: "opened", url: data.pullRequestUrl, message: null } });
+    } catch {
+      patchSession({
+        openPr: { status: "error", url: null, message: "Could not reach the pull request service." },
+      });
+    }
+  }
+
   async function runReset() {
     patchSession({ action: "resetting", errorMessage: null });
     try {
@@ -387,7 +425,13 @@ export function SecurityDemoPanel({
       )}
 
       {liveRecord.step === "loaded" && liveRecord.data.status === "protected" && (
-        <ProtectedCard session={activeSession} capabilities={effectiveCapabilities} liveData={liveRecord.data} onReset={runReset} />
+        <ProtectedCard
+          session={activeSession}
+          capabilities={effectiveCapabilities}
+          liveData={liveRecord.data}
+          onReset={runReset}
+          onOpenPr={runOpenPr}
+        />
       )}
     </div>
   );
@@ -610,11 +654,13 @@ function ProtectedCard({
   capabilities,
   liveData,
   onReset,
+  onOpenPr,
 }: {
   session: SessionState;
   capabilities: DeploymentCapabilities;
   liveData: Extract<LiveStateApiResponse, { ok: true; status: "protected" }>;
   onReset: () => void;
+  onOpenPr: () => void;
 }) {
   const verified = session.action === "repair_verified" && session.verifiedBefore !== null && session.verifiedAfter !== null;
 
@@ -648,6 +694,48 @@ function ProtectedCard({
           <p>Query fingerprint: {QUERY_FINGERPRINT}</p>
         </div>
       </details>
+
+      {/*
+        Offered only once a human has approved a repair and it has been
+        verified in this session. A database that merely happens to be
+        protected is not consent to open a pull request on the repository.
+      */}
+      {verified && (
+        <div className="mt-4 rounded-md border border-emerald-700/40 bg-emerald-950/40 p-3">
+          {session.openPr.status === "opened" && session.openPr.url ? (
+            <p className="text-sm">
+              Pull request opened:{" "}
+              <a
+                href={session.openPr.url}
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold underline underline-offset-2 hover:text-white"
+              >
+                view the pull request on GitHub
+              </a>
+            </p>
+          ) : session.openPr.status === "opening" ? (
+            <Spinner label="Opening pull request…" />
+          ) : (
+            <>
+              <p className="text-sm">Offer the same fix back to the repository as a pull request.</p>
+              <button
+                type="button"
+                onClick={onOpenPr}
+                className={`mt-3 bg-emerald-700 hover:bg-emerald-600 focus-visible:ring-emerald-400 ${primaryButtonClasses}`}
+              >
+                Open pull request with this fix
+              </button>
+            </>
+          )}
+
+          {session.openPr.status === "error" && session.openPr.message && (
+            <p role="alert" className="mt-2 text-xs text-amber-300">
+              {session.openPr.message}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="mt-4">
         {session.action === "resetting" ? (
