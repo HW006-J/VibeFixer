@@ -21,7 +21,7 @@ function describeUsingAccess(operation: PolicyOperation | null): string {
 export function explainAllowAllUsing(operation: PolicyOperation | null, table: string | null): string {
   const access = describeUsingAccess(operation);
   const scope = table ? ` in \`${table}\`` : "";
-  return `This policy's USING clause is the literal boolean true, so PostgreSQL treats it as satisfied for every row regardless of who is asking. Row Level Security is effectively disabled: any client holding this role can ${access}${scope}.`;
+  return `This policy's USING clause is the literal boolean true, so PostgreSQL treats it as satisfied for every row regardless of who is asking. Row Level Security is effectively disabled: any client holding this role can ${access}${scope}. This is broken access control (OWASP A01:2021) — because the database decides who may see a row, any screen or API that looks a record up by its id will hand back records the caller does not own, and changing an id in a URL is usually enough to reach them.`;
 }
 
 export function remediateAllowAllUsing(ownerColumnHint: string | null): string {

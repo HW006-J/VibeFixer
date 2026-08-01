@@ -14,6 +14,24 @@ export type ParsedView = {
 };
 
 const VIEW_NAME_RE = /^create\s+(?:or\s+replace\s+)?view\s+"?([A-Za-z0-9_."]+)"?/i;
+
+/** Leading `-- line` and block comments, plus surrounding whitespace. */
+const LEADING_COMMENTS_RE = /^(?:\s|--[^\n]*\n|\/\*[\s\S]*?\*\/)+/;
+
+/**
+ * Strips comments and whitespace preceding the statement so the anchored
+ * name pattern above sees the CREATE VIEW itself.
+ *
+ * Statements arrive with any preceding comment block attached, and a
+ * commented view is the normal case in hand-written migrations — the
+ * anchor previously failed on all of them, so the finding could not name
+ * the view it was about. Stripping only the *leading* run keeps the anchor,
+ * which is what stops a `-- create view public.decoy` comment from being
+ * mistaken for the real statement.
+ */
+function withoutLeadingComments(raw: string): string {
+  return raw.replace(LEADING_COMMENTS_RE, "");
+}
 const SECURITY_INVOKER_RE = /security_invoker\s*=\s*(true|on|1)\b/i;
 const TABLE_REFERENCE_RE = /\b(?:from|join)\s+"?([A-Za-z_][A-Za-z0-9_."]*)"?/gi;
 
@@ -28,7 +46,7 @@ const TABLE_REFERENCE_RE = /\b(?:from|join)\s+"?([A-Za-z_][A-Za-z0-9_."]*)"?/gi;
 export function parseViewStatement(statement: SqlStatement, fileContent: string, filePath: string): ParsedView {
   const { raw } = statement;
 
-  const nameMatch = VIEW_NAME_RE.exec(raw);
+  const nameMatch = VIEW_NAME_RE.exec(withoutLeadingComments(raw));
 
   const referencedTables = new Set<string>();
   let match: RegExpExecArray | null;
