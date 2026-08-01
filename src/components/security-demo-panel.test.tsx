@@ -187,6 +187,30 @@ describe("SecurityDemoPanel", () => {
     expect(screen.queryByText(/configuration drift/i)).toBeNull();
   });
 
+  it("labels a genuine 'unavailable' live-state response distinctly, with its real reason", async () => {
+    mockFetch({
+      liveState: [
+        { ok: true, status: "unavailable", reason: "The demo Supabase environment is not fully configured on the server." },
+      ],
+    });
+    render(<SecurityDemoPanel repositoryUrl={REPO_URL} refreshToken={1} sourceState="finding_present" />);
+
+    await screen.findByText(/the demo supabase environment is not fully configured/i);
+    expect(screen.getAllByText(/live inspection unavailable/i).length).toBeGreaterThan(0);
+  });
+
+  it("labels a request-level failure (e.g. the repository gate rejecting it) distinctly from a genuine 'unavailable' status, showing the real reason", async () => {
+    mockFetch({
+      liveState: [{ ok: false, error: { code: "LIVE_VALIDATION_NOT_AVAILABLE", message: "This action requires an authorised connected test environment." } }],
+    });
+    render(<SecurityDemoPanel repositoryUrl={REPO_URL} refreshToken={1} sourceState="finding_present" />);
+
+    await screen.findByText(/live check failed/i);
+    expect(screen.getByText(/this action requires an authorised connected test environment/i)).toBeTruthy();
+    // The generic "Live inspection unavailable" label must not be shown for this distinct failure mode.
+    expect(screen.queryByText(/^live inspection unavailable$/i)).toBeNull();
+  });
+
   it("reconstructs state from the server on a rescan rather than keeping stale content", async () => {
     mockFetch({ liveState: [PROTECTED_STATE, VULNERABLE_STATE] });
     const { rerender } = render(<SecurityDemoPanel repositoryUrl={REPO_URL} refreshToken={1} sourceState="finding_present" />);

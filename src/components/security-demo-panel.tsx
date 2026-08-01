@@ -365,6 +365,13 @@ function liveStatusLabel(status: string): string {
       return "Unexpected state";
     case "unavailable":
       return "Live inspection unavailable";
+    // "error" means the /api/repair/live-state request itself failed
+    // (network error, or the repository gate rejected it) — distinct from
+    // a real, successful response reporting status "unavailable". Collapsing
+    // both into the same "Live inspection unavailable" label hid which one
+    // actually happened; the real reason is still shown in the alert below.
+    case "error":
+      return "Live check failed — see details below";
     default:
       return "Live inspection unavailable";
   }
@@ -377,6 +384,8 @@ function liveStatusClasses(status: string): string {
     case "protected":
       return "text-emerald-300";
     case "unexpected":
+      return "text-amber-300";
+    case "error":
       return "text-amber-300";
     default:
       return "text-zinc-400";
