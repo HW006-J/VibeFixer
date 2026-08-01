@@ -73,6 +73,29 @@ describe("determineLiveDemoState", () => {
     expect(result).toMatchObject({ status: "unavailable", reason: "Could not sign in." });
   });
 
+  it("never reports protected when the query itself fails with 401, even if the deployed policy is already the trusted repair", async () => {
+    // This is the specific safety property behind the "live query ... failed
+    // with status 401" bug: an authentication/authorization failure on the
+    // verification query must never be reported as a successful "protected"
+    // result just because the policy text alone looks safe.
+    readDemoSupabaseConfigMock.mockReturnValue(DEMO_CONFIG);
+    getCurrentPolicyExpressionMock.mockResolvedValue({ ok: true, expression: "auth.uid() = trainer_id" });
+    runLiveValidationMock.mockResolvedValue({
+      ok: false,
+      error: "QUERY_FAILED",
+      message: "The live query against public.clients failed with status 401.",
+    });
+
+    const { determineLiveDemoState } = await import("./live-state");
+    const result = await determineLiveDemoState();
+
+    expect(result).toMatchObject({
+      status: "unavailable",
+      reason: "The live query against public.clients failed with status 401.",
+    });
+    expect(result.status).not.toBe("protected");
+  });
+
   it("reports unexpected when no live policy is found for the table", async () => {
     readDemoSupabaseConfigMock.mockReturnValue(DEMO_CONFIG);
     getCurrentPolicyExpressionMock.mockResolvedValue({ ok: true, expression: null });

@@ -63,6 +63,42 @@ describe("buildSchemaInventory", () => {
     expect(inventory.statementsInspected).toBe(3);
   });
 
+  it("sets ownerColumnHint from a column's references auth.users(...) foreign key", () => {
+    const inventory = buildSchemaInventory([
+      file("supabase/migrations/0001.sql", [
+        "create table public.clients (",
+        "  id uuid primary key default gen_random_uuid(),",
+        "  trainer_id uuid not null references auth.users(id) on delete cascade",
+        ");",
+      ]),
+    ]);
+    expect(inventory.tables.get("public.clients")?.ownerColumnHint).toBe("trainer_id");
+  });
+
+  it("leaves ownerColumnHint null when no column references auth.users", () => {
+    const inventory = buildSchemaInventory([
+      file("supabase/migrations/0001.sql", ["create table public.notes (id uuid primary key, body text);"]),
+    ]);
+    expect(inventory.tables.get("public.notes")?.ownerColumnHint).toBeNull();
+  });
+
+  it("parses createdAt and ownerColumnHint when CREATE TABLE is preceded by leading comment lines", () => {
+    const inventory = buildSchemaInventory([
+      file("supabase/migrations/0001.sql", [
+        "-- Deliberately simplified schema for an authorised security demonstration.",
+        "-- Do not deploy this fixture to a real production application.",
+        "",
+        "create table public.clients (",
+        "  id uuid primary key default gen_random_uuid(),",
+        "  trainer_id uuid not null references auth.users(id) on delete cascade",
+        ");",
+      ]),
+    ]);
+    const table = inventory.tables.get("public.clients");
+    expect(table?.createdAt).not.toBeNull();
+    expect(table?.ownerColumnHint).toBe("trainer_id");
+  });
+
   it("discovers functions and views alongside tables and policies", () => {
     const inventory = buildSchemaInventory([
       file("supabase/migrations/0001.sql", [

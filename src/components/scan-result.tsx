@@ -1,9 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { computeSecuritySummary, type LiveVerificationEvidence } from "@/lib/audit/summary";
 import type { AuditCoverage, AuditFinding, AuditFindingTier } from "@/lib/audit/types";
 import type { ScanErrorResponse } from "@/lib/scanner/api-types";
+import type { ExecutiveNarrative } from "@/lib/ai/executive-narrative";
+import { auditFindingToUnified } from "@/lib/security/from-audit";
+import type { SecurityCategory, UnifiedFinding, UnifiedSeverity } from "@/lib/security/finding";
+import { categoryLabel, formatReportAsMarkdown, type SecurityReport } from "@/lib/security/report";
 import { SecurityDemoPanel } from "./security-demo-panel";
 
 type SuccessState = {
@@ -12,9 +16,10 @@ type SuccessState = {
   repositoryUrl: string;
   isDemoRepository: boolean;
   findings: AuditFinding[];
+  unifiedFindings: UnifiedFinding[];
+  securityReport: SecurityReport;
   coverage: AuditCoverage;
   durationMs: number;
-  /** Incremented on every scan submission (even of the same URL) — forces SecurityDemoPanel to re-derive live state from the server rather than showing a result from a previous scan. */
   scanToken: number;
 };
 
@@ -25,6 +30,8 @@ type ErrorState = {
 
 export type ScanResultState = SuccessState | ErrorState;
 
+type CategoryFilter = "all" | SecurityCategory | "review";
+
 function pluralise(count: number, singular: string, plural: string): string {
   return count === 1 ? singular : plural;
 }
@@ -34,22 +41,76 @@ function oneSentence(text: string): string {
   return match ? match[0] : text;
 }
 
-/**
- * A checklist of facts already confirmed by the real server response.
- * Kept under Technical details — it's parser-level detail (file/statement
- * counts, timing), not something needed to follow the 2-3 minute demo.
- */
-function PipelineFacts({ state }: { state: SuccessState }) {
-  const { repository, coverage, durationMs } = state;
+function severityBadgeLabel(severity: UnifiedSeverity): string {
+  if (severity === "review") return "needs review";
+  return severity;
+}
 
+function severityCardClasses(severity: UnifiedSeverity): string {
+  switch (severity) {
+    case "critical":
+      return "border-red-500/60 bg-red-950/40 text-red-100 shadow-[0_0_0_1px_rgba(239,68,68,0.15)]";
+    case "high":
+      return "border-orange-500/50 bg-orange-950/30 text-orange-100";
+    case "medium":
+      return "border-yellow-500/40 bg-yellow-950/20 text-yellow-100";
+    case "review":
+      return "border-amber-500/50 bg-amber-950/20 text-amber-100";
+  }
+}
+
+function severityBadgeClasses(severity: UnifiedSeverity): string {
+  switch (severity) {
+    case "critical":
+      return "bg-red-600 text-white";
+    case "high":
+      return "bg-orange-600 text-white";
+    case "medium":
+      return "bg-yellow-600 text-white";
+    case "review":
+      return "bg-amber-600 text-white";
+  }
+}
+
+function overallRiskLabel(level: SecurityReport["overallRisk"]): string {
+  switch (level) {
+    case "critical":
+      return "Critical risk detected";
+    case "high":
+      return "High risk detected";
+    case "moderate":
+      return "Needs review";
+    case "low":
+      return "No issue detected by the current Vibe Fixer rule set";
+    case "none":
+      return "Nothing to assess yet";
+  }
+}
+
+function overallRiskClasses(level: SecurityReport["overallRisk"]): string {
+  switch (level) {
+    case "critical":
+      return "border-red-500/60 bg-red-950/40 text-red-100";
+    case "high":
+      return "border-orange-500/50 bg-orange-950/30 text-orange-100";
+    case "moderate":
+      return "border-amber-500/50 bg-amber-950/20 text-amber-100";
+    case "low":
+      return "border-emerald-600/50 bg-emerald-950/30 text-emerald-100";
+    case "none":
+      return "border-zinc-700 bg-zinc-900/60 text-zinc-200";
+  }
+}
+
+function PipelineFacts({ state }: { state: SuccessState }) {
+  const { repository, coverage, durationMs, securityReport } = state;
   const facts = [
     `Repository scanned: ${repository}`,
-    `${coverage.filesScanned.length} SQL ${pluralise(coverage.filesScanned.length, "file", "files")} fetched from GitHub`,
+    `${securityReport.filesInspected.length} ${pluralise(securityReport.filesInspected.length, "file", "files")} fetched from GitHub`,
     `${coverage.statementsInspected} SQL ${pluralise(coverage.statementsInspected, "statement", "statements")} inspected`,
-    `${coverage.policiesInspected} RLS ${pluralise(coverage.policiesInspected, "policy", "policies")} discovered across ${coverage.tablesDiscovered} ${pluralise(coverage.tablesDiscovered, "table", "tables")}`,
-    ...(coverage.aiReviewsPerformed > 0
-      ? [`${coverage.aiReviewsPerformed} reviewed by a real Gemini model call`]
-      : []),
+    `${coverage.policiesInspected} RLS ${pluralise(coverage.policiesInspected, "policy", "policies")} across ${coverage.tablesDiscovered} ${pluralise(coverage.tablesDiscovered, "table", "tables")}`,
+    `${securityReport.checksRun} deterministic checks run across ${securityReport.categoriesAssessed.join(", ") || "no categories"}`,
+    ...(coverage.aiReviewsPerformed > 0 ? [`${coverage.aiReviewsPerformed} Supabase clauses reviewed by Gemini`] : []),
     `Completed in ${durationMs}ms`,
   ];
 
@@ -65,69 +126,39 @@ function PipelineFacts({ state }: { state: SuccessState }) {
   );
 }
 
-function riskLevelLabel(level: ReturnType<typeof computeSecuritySummary>["riskLevel"]): string {
-  switch (level) {
-    case "critical":
-      return "Critical risk detected";
-    case "high":
-      return "High risk detected";
-    case "moderate":
-      return "Needs review";
-    case "low":
-      return "No known issues detected";
-    case "none":
-      return "Nothing to assess yet";
-  }
-}
-
-function riskLevelClasses(level: ReturnType<typeof computeSecuritySummary>["riskLevel"]): string {
-  switch (level) {
-    case "critical":
-      return "border-red-500/60 bg-red-950/40 text-red-100";
-    case "high":
-      return "border-orange-500/50 bg-orange-950/30 text-orange-100";
-    case "moderate":
-      return "border-amber-500/50 bg-amber-950/20 text-amber-100";
-    case "low":
-      return "border-emerald-600/50 bg-emerald-950/30 text-emerald-100";
-    case "none":
-      return "border-zinc-700 bg-zinc-900/60 text-zinc-200";
-  }
-}
-
-/**
- * The executive summary: understandable at a glance, without opening any
- * technical details. Every number and claim here comes directly from the
- * real scan report (and, once available, real live-validation evidence
- * threaded up from SecurityDemoPanel) — never a separate model call.
- */
-function SecuritySummaryCard({ state, liveEvidence }: { state: SuccessState; liveEvidence: LiveVerificationEvidence | null }) {
-  const summary = computeSecuritySummary(
-    { repository: state.repository, isDemoRepository: state.isDemoRepository, findings: state.findings, coverage: state.coverage, durationMs: state.durationMs },
-    liveEvidence,
-  );
-
+function ExecutiveReportCard({
+  report,
+  supabaseSummary,
+  liveEvidence,
+}: {
+  report: SecurityReport;
+  supabaseSummary: ReturnType<typeof computeSecuritySummary>;
+  liveEvidence: LiveVerificationEvidence | null;
+}) {
   return (
-    <div className={`rounded-lg border p-5 ${riskLevelClasses(summary.riskLevel)}`}>
-      <p className="text-xs font-semibold uppercase tracking-wide opacity-70">Security summary</p>
-      <p className="mt-1 text-lg font-bold">{riskLevelLabel(summary.riskLevel)}</p>
+    <div className={`rounded-lg border p-5 ${overallRiskClasses(report.overallRisk)}`}>
+      <p className="text-xs font-semibold uppercase tracking-wide opacity-70">Executive security report</p>
+      <p className="mt-1 text-lg font-bold">{overallRiskLabel(report.overallRisk)}</p>
       <p className="mt-1 text-sm">
-        {summary.criticalCount} critical · {summary.highCount} high · {summary.needsReviewCount} needs review
+        {report.counts.critical} critical · {report.counts.high} high · {report.counts.medium} medium ·{" "}
+        {report.counts.review} needs review
       </p>
       <p className="mt-1 text-sm opacity-80">
-        {summary.policiesChecked} {pluralise(summary.policiesChecked, "policy", "policies")} checked across{" "}
-        {summary.tablesChecked} {pluralise(summary.tablesChecked, "table", "tables")} ({summary.checksRun} deterministic
-        checks run)
+        {report.filesInspected.length} files inspected · {report.checksRun} checks run
+      </p>
+      <p className="mt-1 text-sm opacity-80">
+        Supabase: {supabaseSummary.policiesChecked} {pluralise(supabaseSummary.policiesChecked, "policy", "policies")} across{" "}
+        {supabaseSummary.tablesChecked} {pluralise(supabaseSummary.tablesChecked, "table", "tables")}
       </p>
 
-      {summary.topRisks.length > 0 && (
+      {report.topFindings.length > 0 && (
         <div className="mt-3">
-          <p className="text-xs font-semibold uppercase tracking-wide opacity-70">
-            {summary.topRisks.length === 1 ? "Top issue" : "Top issues"}
-          </p>
+          <p className="text-xs font-semibold uppercase tracking-wide opacity-70">Top findings</p>
           <ul className="mt-1 flex flex-col gap-1 text-sm">
-            {summary.topRisks.map((risk) => (
-              <li key={risk}>{risk}</li>
+            {report.topFindings.map((f) => (
+              <li key={f.id}>
+                {f.title} ({categoryLabel(f.category)})
+              </li>
             ))}
           </ul>
         </div>
@@ -136,103 +167,86 @@ function SecuritySummaryCard({ state, liveEvidence }: { state: SuccessState; liv
       <div className="mt-3">
         <p className="text-xs font-semibold uppercase tracking-wide opacity-70">Live verification</p>
         <p className="mt-1 text-sm">
-          {summary.liveVerification.performed
-            ? summary.liveVerification.summary
+          {liveEvidence
+            ? supabaseSummary.liveVerification.summary
             : "Not yet verified — run live validation below to confirm against the real database."}
         </p>
       </div>
 
-      {summary.recommendedNextStep && (
+      {report.recommendedRemediationPriority[0] && (
         <div className="mt-3">
-          <p className="text-xs font-semibold uppercase tracking-wide opacity-70">Recommended next step</p>
-          <p className="mt-1 text-sm">{summary.recommendedNextStep}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide opacity-70">Recommended remediation priority</p>
+          <p className="mt-1 text-sm">{report.recommendedRemediationPriority[0]}</p>
         </div>
       )}
-
-      <p className="mt-4 text-xs leading-relaxed opacity-60">
-        Checks discovered Supabase policies and schema objects against common access-control failure patterns.
-        Complex or ambiguous cases are marked for review.
-      </p>
     </div>
   );
 }
 
-function assessmentLabel(assessment: "likely_safe" | "likely_unsafe" | "uncertain"): string {
-  switch (assessment) {
-    case "likely_safe":
-      return "Likely safe";
-    case "likely_unsafe":
-      return "Likely unsafe";
-    case "uncertain":
-      return "Uncertain";
-  }
+function CategoryBreakdown({ findings }: { findings: UnifiedFinding[] }) {
+  const categories: SecurityCategory[] = ["supabase", "iam", "secret", "endpoint"];
+  return (
+    <div className="flex flex-wrap gap-2">
+      {categories.map((cat) => {
+        const count = findings.filter((f) => f.category === cat).length;
+        return (
+          <span
+            key={cat}
+            className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-xs text-zinc-300"
+          >
+            {categoryLabel(cat)}: {count}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
-function assessmentClasses(assessment: "likely_safe" | "likely_unsafe" | "uncertain"): string {
-  switch (assessment) {
-    case "likely_safe":
-      return "border-emerald-500/50 bg-emerald-950/30 text-emerald-200";
-    case "likely_unsafe":
-      return "border-red-500/50 bg-red-950/30 text-red-200";
-    case "uncertain":
-      return "border-amber-500/50 bg-amber-950/30 text-amber-200";
-  }
+function FilterBar({ filter, onChange }: { filter: CategoryFilter; onChange: (f: CategoryFilter) => void }) {
+  const options: { id: CategoryFilter; label: string }[] = [
+    { id: "all", label: "All" },
+    { id: "supabase", label: "Supabase" },
+    { id: "iam", label: "IAM" },
+    { id: "secret", label: "Secrets" },
+    { id: "endpoint", label: "Endpoints" },
+    { id: "review", label: "Needs review" },
+  ];
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((opt) => (
+        <button
+          key={opt.id}
+          type="button"
+          onClick={() => onChange(opt.id)}
+          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            filter === opt.id ? "bg-red-600 text-white" : "border border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-zinc-500"
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
-function tierBadgeLabel(tier: AuditFindingTier): string {
-  switch (tier) {
-    case "critical":
-      return "critical";
-    case "high":
-      return "high";
-    case "review":
-      return "needs review";
-  }
-}
-
-function tierCardClasses(tier: AuditFindingTier): string {
-  switch (tier) {
-    case "critical":
-      return "border-red-500/60 bg-red-950/40 text-red-100 shadow-[0_0_0_1px_rgba(239,68,68,0.15)]";
-    case "high":
-      return "border-orange-500/50 bg-orange-950/30 text-orange-100";
-    case "review":
-      return "border-amber-500/50 bg-amber-950/20 text-amber-100";
-  }
-}
-
-function tierBadgeClasses(tier: AuditFindingTier): string {
-  switch (tier) {
-    case "critical":
-      return "bg-red-600 text-white";
-    case "high":
-      return "bg-orange-600 text-white";
-    case "review":
-      return "bg-amber-600 text-white";
-  }
-}
-
-function objectLabel(finding: AuditFinding): string {
-  const kind = finding.objectType === "view" ? "View" : finding.objectType === "function" ? "Function" : "Table";
-  const name = finding.table ?? (finding.evidence.match(/"?([A-Za-z0-9_."]+)"?\s*\(/)?.[1] ?? null) ?? "unknown";
-  return `${kind}: ${name}`;
-}
-
-/**
- * A single finding card, used for every tier (critical/high/needs review).
- * Shows only what's needed to follow the demo at a glance — severity,
- * plain-English title, one-sentence impact, affected object, operation and
- * role, and the recommended action. Raw SQL, file/line, assumptions, and
- * parser-level detail live behind "Technical details", collapsed by
- * default.
- */
-function FindingCard({ finding, isDemoRepository }: { finding: AuditFinding; isDemoRepository: boolean }) {
+function UnifiedFindingCard({
+  finding,
+  auditFinding,
+  isDemoRepository,
+}: {
+  finding: UnifiedFinding;
+  auditFinding?: AuditFinding;
+  isDemoRepository: boolean;
+}) {
   return (
     <div className="flex flex-col gap-2">
-      <div role="alert" className={`rounded-lg border p-5 ${tierCardClasses(finding.tier)}`}>
+      <div role="alert" className={`rounded-lg border p-5 ${severityCardClasses(finding.severity)}`}>
         <div className="flex flex-wrap items-center gap-2">
-          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide ${tierBadgeClasses(finding.tier)}`}>
-            {tierBadgeLabel(finding.tier)}
+          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide ${severityBadgeClasses(finding.severity)}`}>
+            {severityBadgeLabel(finding.severity)}
+          </span>
+          <span className="inline-flex items-center rounded-full border border-current/30 px-2.5 py-0.5 text-xs opacity-80">
+            {categoryLabel(finding.category)}
           </span>
           <span className="inline-flex items-center rounded-full border border-current/30 px-2.5 py-0.5 text-xs font-mono opacity-80">
             {finding.ruleId}
@@ -240,64 +254,47 @@ function FindingCard({ finding, isDemoRepository }: { finding: AuditFinding; isD
         </div>
 
         <h3 className="mt-3 text-lg font-semibold">{finding.title}</h3>
-        <p className="mt-2 text-sm leading-relaxed opacity-90">{oneSentence(finding.explanation)}</p>
-
-        <dl className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs opacity-80">
-          <div>{objectLabel(finding)}</div>
-          {finding.operation && <div>Operation: {finding.operation}</div>}
-          {finding.role && <div>Role: {finding.role}</div>}
-        </dl>
+        <p className="mt-2 text-sm leading-relaxed opacity-90">{oneSentence(finding.impact)}</p>
 
         <p className="mt-3 text-sm leading-relaxed">
           <span className="font-semibold">Recommended action: </span>
-          {finding.remediation}
+          {finding.recommendation}
         </p>
 
-        {finding.aiReview && (
-          <div className={`mt-3 rounded-md border p-3 ${assessmentClasses(finding.aiReview.assessment)}`}>
+        {auditFinding?.aiReview && (
+          <div className="mt-3 rounded-md border border-amber-500/50 bg-amber-950/30 p-3 text-amber-100">
             <p className="text-xs font-semibold uppercase tracking-wide">
-              Gemini semantic review ({finding.aiReview.model}) — {assessmentLabel(finding.aiReview.assessment)}
+              Gemini semantic review ({auditFinding.aiReview.model})
             </p>
-            <p className="mt-1 text-sm leading-relaxed">{finding.aiReview.reasoning}</p>
-            <p className="mt-2 text-xs opacity-70">An AI opinion, not a guarantee. It does not replace manual review.</p>
+            <p className="mt-1 text-sm leading-relaxed">{auditFinding.aiReview.reasoning}</p>
           </div>
         )}
 
         <details className="mt-4 text-xs opacity-70">
           <summary className="cursor-pointer select-none">Technical details</summary>
           <dl className="mt-3 flex flex-col gap-3 text-sm">
-            <div className="min-w-0">
+            <div>
               <dt className="opacity-70">File</dt>
               <dd className="mt-0.5 break-all font-mono">
-                {finding.filePath}:{finding.line}
-                {finding.endLine && finding.endLine !== finding.line ? `-${finding.endLine}` : ""}
+                {finding.filePath}:{finding.startLine}
+                {finding.endLine !== finding.startLine ? `-${finding.endLine}` : ""}
               </dd>
             </div>
-            <div className="min-w-0">
-              <dt className="opacity-70">Full explanation</dt>
-              <dd className="mt-0.5 leading-relaxed">{finding.explanation}</dd>
+            <div>
+              <dt className="opacity-70">Verification</dt>
+              <dd className="mt-0.5">{finding.verification.replace("_", " ")}</dd>
             </div>
             {finding.assumptions && (
-              <div className="min-w-0">
+              <div>
                 <dt className="opacity-70">Assumptions</dt>
                 <dd className="mt-0.5 leading-relaxed">{finding.assumptions}</dd>
               </div>
             )}
-            {finding.expression && (
-              <div className="min-w-0">
-                <dt className="opacity-70">{finding.clause} expression</dt>
-                <dd className="mt-1">
-                  <pre className="overflow-x-auto rounded-md bg-black/40 p-3 text-xs">
-                    <code>{finding.expression}</code>
-                  </pre>
-                </dd>
-              </div>
-            )}
-            <div className="min-w-0">
-              <dt className="opacity-70">Raw evidence</dt>
+            <div>
+              <dt className="opacity-70">Redacted evidence</dt>
               <dd className="mt-1">
                 <pre className="overflow-x-auto rounded-md bg-black/60 p-3 text-xs">
-                  <code>{finding.evidence}</code>
+                  <code>{finding.redactedEvidence}</code>
                 </pre>
               </dd>
             </div>
@@ -305,7 +302,7 @@ function FindingCard({ finding, isDemoRepository }: { finding: AuditFinding; isD
         </details>
       </div>
 
-      {finding.tier === "critical" && (
+      {finding.severity === "critical" && finding.category === "supabase" && (
         <span className="inline-flex w-fit items-center rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-0.5 text-xs text-zinc-400">
           {finding.liveValidationAvailable
             ? "Static repository finding — run live validation below to confirm on the deployed database"
@@ -318,24 +315,172 @@ function FindingCard({ finding, isDemoRepository }: { finding: AuditFinding; isD
   );
 }
 
+function ReportActions({
+  state,
+  displayFindings,
+}: {
+  state: SuccessState;
+  displayFindings: UnifiedFinding[];
+}) {
+  const markdown = formatReportAsMarkdown(state.securityReport, displayFindings);
+
+  function copyReport() {
+    void navigator.clipboard.writeText(markdown);
+  }
+
+  function downloadMarkdown() {
+    const blob = new Blob([markdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `vibe-fixer-report-${state.repository.replace("/", "-")}.md`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button
+        type="button"
+        onClick={copyReport}
+        className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:border-zinc-500"
+      >
+        Copy report
+      </button>
+      <button
+        type="button"
+        onClick={downloadMarkdown}
+        className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:border-zinc-500"
+      >
+        Download Markdown
+      </button>
+    </div>
+  );
+}
+
+function GeminiNarrativeSection({ state, liveEvidence }: { state: SuccessState; liveEvidence: LiveVerificationEvidence | null }) {
+  const [loading, setLoading] = useState(false);
+  const [narrative, setNarrative] = useState<ExecutiveNarrative | null>(null);
+  const [verifiedCount, setVerifiedCount] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function generateSummary() {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/security-narrative", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repository: state.repository,
+          report: state.securityReport,
+          findings: state.unifiedFindings,
+          liveVerificationSummary: liveEvidence
+            ? liveEvidence.leakedRowCount > 0
+              ? `${liveEvidence.leakedRowCount} cross-tenant rows exposed`
+              : "0 cross-tenant rows exposed"
+            : null,
+        }),
+      });
+      const data = (await response.json()) as {
+        ok: boolean;
+        narrative?: ExecutiveNarrative;
+        verifiedFindingCount?: number;
+        error?: { message: string };
+      };
+      if (!data.ok || !data.narrative) {
+        setError(data.error?.message ?? "Executive narrative unavailable.");
+        return;
+      }
+      setNarrative(data.narrative);
+      setVerifiedCount(data.verifiedFindingCount ?? state.unifiedFindings.length);
+    } catch {
+      setError("Could not reach the narrative service.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm font-medium text-zinc-200">AI executive narrative</p>
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => void generateSummary()}
+          className="rounded-md bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-100 hover:bg-zinc-700 disabled:opacity-60"
+        >
+          {loading ? "Generating…" : "Generate AI summary"}
+        </button>
+      </div>
+      {error && <p className="mt-2 text-sm text-amber-300">{error}</p>}
+      {narrative && (
+        <div className="mt-3 flex flex-col gap-2 text-sm text-zinc-300">
+          <p className="text-xs text-zinc-500">
+            Generated from {state.unifiedFindings.length} scanned{" "}
+            {pluralise(state.unifiedFindings.length, "finding", "findings")} · {verifiedCount ?? 0} live-verified{" "}
+            {pluralise(verifiedCount ?? 0, "finding", "findings")}
+          </p>
+          <p>{narrative.executiveSummary}</p>
+          <p className="text-xs opacity-80">{narrative.blastRadiusSummary}</p>
+          <p className="text-xs opacity-70">{narrative.uncertainty}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function applyLiveEvidence(findings: UnifiedFinding[], liveEvidence: LiveVerificationEvidence | null): UnifiedFinding[] {
+  if (!liveEvidence) return findings;
+  return findings.map((f) =>
+    f.liveValidationAvailable ? { ...f, verification: "live_verified" as const } : f,
+  );
+}
+
+function matchesFilter(finding: UnifiedFinding, filter: CategoryFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "review") return finding.severity === "review" || finding.verification === "needs_review";
+  return finding.category === filter;
+}
+
 export function ScanResult({ state }: { state: ScanResultState }) {
   const [liveEvidence, setLiveEvidence] = useState<LiveVerificationEvidence | null>(null);
+  const [filter, setFilter] = useState<CategoryFilter>("all");
+
+  const successState = state.status === "success" ? state : null;
+
+  const displayFindings = useMemo(() => {
+    if (!successState) return [];
+    return applyLiveEvidence(successState.unifiedFindings, liveEvidence);
+  }, [successState, liveEvidence]);
+
+  const auditByUnifiedId = useMemo(() => {
+    const map = new Map<string, AuditFinding>();
+    if (!successState) return map;
+    for (const f of successState.findings) {
+      map.set(auditFindingToUnified(f).id, f);
+    }
+    return map;
+  }, [successState]);
 
   if (state.status === "error") {
     return (
-      <div
-        role="alert"
-        className="rounded-lg border border-amber-500/50 bg-amber-950/30 p-5 text-amber-100"
-      >
-        <p className="text-sm font-semibold uppercase tracking-wide text-amber-300">
-          Scan failed
-        </p>
+      <div role="alert" className="rounded-lg border border-amber-500/50 bg-amber-950/30 p-5 text-amber-100">
+        <p className="text-sm font-semibold uppercase tracking-wide text-amber-300">Scan failed</p>
         <p className="mt-2 text-sm leading-relaxed">{state.error.message}</p>
       </div>
     );
   }
 
-  const { findings, coverage, repository, repositoryUrl, isDemoRepository, scanToken } = state;
+  const { findings, securityReport, coverage, repository, repositoryUrl, isDemoRepository, scanToken } = state;
+
+  const filteredFindings = displayFindings.filter((f) => matchesFilter(f, filter));
+
+  const supabaseSummary = computeSecuritySummary(
+    { repository: state.repository, isDemoRepository, findings, coverage, durationMs: state.durationMs },
+    liveEvidence,
+  );
 
   function liveSection(sourceState: "finding_present" | "no_finding") {
     if (!isDemoRepository) {
@@ -359,68 +504,94 @@ export function ScanResult({ state }: { state: ScanResultState }) {
     return (
       <div className="flex flex-col gap-4">
         <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 p-5 text-zinc-200">
-          <p className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
-            No migrations found
-          </p>
+          <p className="text-sm font-semibold uppercase tracking-wide text-zinc-400">No scannable files found</p>
           <p className="mt-2 text-sm leading-relaxed">
-            No files under <code className="font-mono">supabase/migrations/</code> or a{" "}
-            <code className="font-mono">supabase/schema.sql</code> were found in{" "}
-            <span className="font-mono">{repository}</span>. This scanner only supports
-            repositories that store their Supabase policy SQL in those locations.
+            No supported Supabase SQL, IAM JSON, API routes, or configuration files matched the bounded fetch rules in{" "}
+            <span className="font-mono">{repository}</span>.
           </p>
         </div>
       </div>
     );
   }
 
-  if (findings.length === 0) {
-    return (
-      <div className="flex flex-col gap-4">
-        <SecuritySummaryCard state={state} liveEvidence={liveEvidence} />
-        <div className="rounded-lg border border-emerald-600/50 bg-emerald-950/30 p-5 text-emerald-100">
-          <p className="text-sm font-semibold uppercase tracking-wide text-emerald-300">
-            No issues flagged
-          </p>
-          <p className="mt-2 text-sm leading-relaxed">
-            Inspected {coverage.policiesInspected} polic{coverage.policiesInspected === 1 ? "y" : "ies"} in{" "}
-            <span className="font-mono">{repository}</span> against known access-control failure patterns and
-            found nothing to flag. This does not prove the deployment is secure — it means no known failure
-            pattern was detected in the SQL that was reachable to this scanner.
-          </p>
-        </div>
-        <details className="text-xs text-zinc-500">
-          <summary className="cursor-pointer select-none">Technical details</summary>
-          <div className="mt-3">
-            <PipelineFacts state={state} />
-          </div>
-        </details>
-        {liveSection("no_finding")}
-      </div>
-    );
-  }
+  const criticalSupabase = findings.filter((f) => f.tier === "critical");
+  const topIds = new Set(securityReport.topFindings.map((f) => f.id));
+  const remainingFindings = filteredFindings.filter((f) => !topIds.has(f.id));
 
-  const orderedFindings = [...findings].sort((a, b) => {
-    const priority: Record<AuditFindingTier, number> = { critical: 0, high: 1, review: 2 };
-    return priority[a.tier] - priority[b.tier];
-  });
-  const criticalFindings = findings.filter((f) => f.tier === "critical");
+  const severityOrder: Record<UnifiedSeverity, number> = { critical: 0, high: 1, medium: 2, review: 3 };
+  const sortedFiltered = [...filteredFindings].sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+  const topFiltered = sortedFiltered.filter((f) => topIds.has(f.id));
 
   return (
     <div className="flex flex-col gap-4">
-      <SecuritySummaryCard state={state} liveEvidence={liveEvidence} />
+      <ExecutiveReportCard report={securityReport} supabaseSummary={supabaseSummary} liveEvidence={liveEvidence} />
+      <CategoryBreakdown findings={displayFindings} />
+      <ReportActions state={state} displayFindings={displayFindings} />
+      <FilterBar filter={filter} onChange={setFilter} />
+
+      {topFiltered.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Top findings</p>
+          {topFiltered.map((finding) => (
+            <UnifiedFindingCard
+              key={finding.id}
+              finding={finding}
+              auditFinding={auditByUnifiedId.get(finding.id)}
+              isDemoRepository={isDemoRepository}
+            />
+          ))}
+        </div>
+      )}
+
+      {criticalSupabase.length > 0 && liveSection("finding_present")}
+
+      {remainingFindings.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">All findings</p>
+          {[...remainingFindings]
+            .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])
+            .map((finding) => (
+              <UnifiedFindingCard
+                key={finding.id}
+                finding={finding}
+                auditFinding={auditByUnifiedId.get(finding.id)}
+                isDemoRepository={isDemoRepository}
+              />
+            ))}
+        </div>
+      )}
+
+      {displayFindings.length === 0 && (
+        <div className="rounded-lg border border-emerald-600/50 bg-emerald-950/30 p-5 text-emerald-100">
+          <p className="text-sm font-semibold uppercase tracking-wide text-emerald-300">No issues flagged</p>
+          <p className="mt-2 text-sm leading-relaxed">
+            No issue detected by the current Vibe Fixer rule set across{" "}
+            {securityReport.categoriesAssessed.join(", ") || "available categories"} in{" "}
+            <span className="font-mono">{repository}</span>.
+          </p>
+        </div>
+      )}
+
+      {displayFindings.length === 0 && liveSection("no_finding")}
 
       <details className="text-xs text-zinc-500">
         <summary className="cursor-pointer select-none">Technical details</summary>
         <div className="mt-3">
           <PipelineFacts state={state} />
+          {securityReport.unsupportedOrMissingContext.length > 0 && (
+            <ul className="mt-3 flex flex-col gap-1 text-xs text-zinc-500">
+              {securityReport.unsupportedOrMissingContext.map((note) => (
+                <li key={note}>{note}</li>
+              ))}
+            </ul>
+          )}
         </div>
       </details>
 
-      {orderedFindings.map((finding) => (
-        <FindingCard key={finding.id} finding={finding} isDemoRepository={isDemoRepository} />
-      ))}
-
-      {criticalFindings.length > 0 && liveSection("finding_present")}
+      <GeminiNarrativeSection state={state} liveEvidence={liveEvidence} />
     </div>
   );
 }
+
+// Re-export for tests that reference AuditFindingTier helpers
+export type { AuditFindingTier };

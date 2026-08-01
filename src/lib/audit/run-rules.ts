@@ -59,6 +59,8 @@ type FindingContext = {
   filePath: string;
   line: number;
   evidence: string;
+  /** The table's real, schema-parsed owner column (references auth.users), when confidently found — never invented. */
+  ownerColumnHint: string | null;
 };
 
 /**
@@ -128,7 +130,7 @@ function classifyRemainingWeakPattern(ctx: FindingContext): AuditFinding | null 
       roles: ctx.roles,
       evidence: ctx.evidence,
       explanation: explainLoginOnly(ctx.clause, ctx.table),
-      remediation: remediateLoginOnly(),
+      remediation: remediateLoginOnly(ctx.ownerColumnHint),
       clause: ctx.clause,
       expression: ctx.expression,
     });
@@ -202,7 +204,11 @@ function classifyNonAllowAllClause(ctx: FindingContext): { finding: AuditFinding
   return { finding: genericFinding, noIssueFound: false };
 }
 
-function evaluatePolicy(policy: ParsedPolicy, repository: string): { findings: AuditFinding[]; noIssueFoundCount: number } {
+function evaluatePolicy(
+  policy: ParsedPolicy,
+  repository: string,
+  ownerColumnHint: string | null,
+): { findings: AuditFinding[]; noIssueFoundCount: number } {
   const findings: AuditFinding[] = [];
   let noIssueFoundCount = 0;
   const role = policyRoleLabel(policy);
@@ -254,7 +260,7 @@ function evaluatePolicy(policy: ParsedPolicy, repository: string): { findings: A
             roles: policy.roles,
             evidence: policy.evidence,
             explanation: explainAllowAllUsing(policy.operation, policy.table),
-            remediation: remediateAllowAllUsing(),
+            remediation: remediateAllowAllUsing(ownerColumnHint),
             clause: "USING",
             expression: policy.usingExpression,
           }),
@@ -272,6 +278,7 @@ function evaluatePolicy(policy: ParsedPolicy, repository: string): { findings: A
         filePath: policy.filePath,
         line,
         evidence: policy.evidence,
+        ownerColumnHint,
       });
       if (result.finding) findings.push(result.finding);
       if (result.noIssueFound) noIssueFoundCount += 1;
@@ -323,7 +330,7 @@ function evaluatePolicy(policy: ParsedPolicy, repository: string): { findings: A
             roles: policy.roles,
             evidence: policy.evidence,
             explanation: explainAllowAllWithCheck(policy.operation, policy.table),
-            remediation: remediateAllowAllWithCheck(),
+            remediation: remediateAllowAllWithCheck(ownerColumnHint),
             clause: "WITH CHECK",
             expression: policy.withCheckExpression,
           }),
@@ -341,6 +348,7 @@ function evaluatePolicy(policy: ParsedPolicy, repository: string): { findings: A
         filePath: policy.filePath,
         line,
         evidence: policy.evidence,
+        ownerColumnHint,
       });
       if (result.finding) findings.push(result.finding);
       if (result.noIssueFound) noIssueFoundCount += 1;
@@ -430,7 +438,7 @@ export function runDeterministicRules(inventory: SchemaInventory, repository: st
     }
 
     for (const policy of table.policies) {
-      const result = evaluatePolicy(policy, repository);
+      const result = evaluatePolicy(policy, repository, table.ownerColumnHint);
       findings.push(...result.findings);
       noIssueFoundCount += result.noIssueFoundCount;
     }

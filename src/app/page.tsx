@@ -15,13 +15,12 @@ export default function Home() {
             Vibe Fixer
           </h1>
           <p className="text-sm font-medium text-zinc-300 sm:text-base">
-            Security checks for AI-built Supabase applications.
+            Security checks for AI-built applications.
           </p>
           <p className="max-w-xl text-sm leading-relaxed text-zinc-400 sm:text-base">
-            Vibe Fixer helps developers who build quickly with AI catch common Supabase security
-            mistakes before users do. It scans Supabase migrations for common access-control
-            failures and, in an authorised environment, can prove, repair and retest one confirmed
-            finding.
+            Vibe Fixer scans repositories for common database, cloud-permission,
+            secret-exposure and API-access mistakes. In an authorised environment, it can also
+            prove, repair and retest one confirmed database finding live.
           </p>
         </header>
 

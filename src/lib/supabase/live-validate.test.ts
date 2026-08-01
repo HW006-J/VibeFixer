@@ -87,6 +87,69 @@ describe("runLiveValidation", () => {
     expect(outcome).toMatchObject({ ok: false, error: "QUERY_FAILED" });
   });
 
+  it("reports QUERY_FAILED with the real status embedded when the query returns 401 after a successful sign-in — the exact reported symptom", async () => {
+    // Sign-in succeeding but the subsequent query returning 401 is a
+    // distinct failure mode from sign-in itself failing: the token was
+    // valid enough to obtain, but the query request was rejected. This must
+    // never be misreported as SIGN_IN_FAILED or as a successful/protected
+    // result.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/auth/v1/token")) {
+          return jsonResponse({ access_token: "real-jwt-for-test", user: { id: "attacker-id" } });
+        }
+        return jsonResponse({ message: "Invalid API key" }, 401);
+      }),
+    );
+
+    const outcome = await runLiveValidation(CONFIG);
+
+    expect(outcome).toEqual({
+      ok: false,
+      error: "QUERY_FAILED",
+      message: "The live query against public.clients failed with status 401.",
+    });
+  });
+
+  it("reports SIGN_IN_FAILED, not a stale success, when Trainer A's credentials are rejected with 401", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ error: "invalid_grant", error_description: "Invalid login credentials" }, 401)),
+    );
+
+    const outcome = await runLiveValidation(CONFIG);
+
+    expect(outcome).toMatchObject({ ok: false, error: "SIGN_IN_FAILED" });
+  });
+
+  it("never includes the raw Supabase response body, an access token, or any credential in the returned message", async () => {
+    const sensitiveToken = "sbp_super-secret-access-token-value-should-never-leak";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/auth/v1/token")) {
+          return jsonResponse({ access_token: sensitiveToken, user: { id: "attacker-id" } });
+        }
+        // Simulate a Supabase error response that happens to echo back
+        // sensitive-looking detail — the outgoing message must not include it.
+        return jsonResponse({ message: "unauthorized", hint: `token=${sensitiveToken}`, code: "PGRST301" }, 401);
+      }),
+    );
+
+    const outcome = await runLiveValidation(CONFIG);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.message).not.toContain(sensitiveToken);
+      expect(outcome.message).not.toContain("PGRST301");
+      expect(outcome.message).not.toContain(CONFIG.attackerPassword);
+      expect(outcome.message).not.toContain(CONFIG.anonKey);
+    }
+  });
+
   it("reports zero leaked rows honestly when only the attacker's own rows come back", async () => {
     vi.stubGlobal(
       "fetch",
