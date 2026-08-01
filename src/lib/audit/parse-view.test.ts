@@ -40,3 +40,58 @@ describe("parseViewStatement", () => {
     expect(parsed.referencedTables.filter((t) => t === "public.clients")).toHaveLength(1);
   });
 });
+
+/**
+ * Reproduces a real miss on the demo-target repository: the view in
+ * 006_add_client_directory_view.sql is preceded by two comment lines, and
+ * the anchored name regex never matched, so every report said "A view may
+ * bypass Row Level Security" instead of naming it. A finding that cannot
+ * name the object it is about is much harder to act on.
+ */
+describe("parseViewStatement — the view's name survives leading comments", () => {
+  function parse(raw: string) {
+    return parseViewStatement({ raw, startIndex: 0 } as never, raw, "supabase/migrations/006.sql");
+  }
+
+  it("names a view preceded by line comments", () => {
+    const view = parse(`-- flat list for the client picker / autocomplete
+-- reads from clients so it picks up the RLS on that table
+create view public.client_directory as
+select id, name, email from public.clients;`);
+
+    expect(view.name).toBe("public.client_directory");
+  });
+
+  it("names a view preceded by a block comment", () => {
+    const view = parse(`/* directory used by the picker */
+create view public.client_directory as select id from public.clients;`);
+
+    expect(view.name).toBe("public.client_directory");
+  });
+
+  it("names a view preceded by blank lines and indentation", () => {
+    const view = parse(`
+
+  create or replace view public.client_directory as select id from public.clients;`);
+
+    expect(view.name).toBe("public.client_directory");
+  });
+
+  it("still finds the referenced table when comments precede the statement", () => {
+    const view = parse(`-- note
+create view public.client_directory as select id from public.clients;`);
+
+    expect(view.referencedTables).toContain("public.clients");
+  });
+
+  it("does not invent a name for a statement that is not a create view", () => {
+    expect(parse("-- a comment\nselect 1;").name).toBeNull();
+  });
+
+  it("is not fooled by the word 'view' inside a comment", () => {
+    const view = parse(`-- create view public.decoy as select 1
+create view public.client_directory as select id from public.clients;`);
+
+    expect(view.name).toBe("public.client_directory");
+  });
+});
