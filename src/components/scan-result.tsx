@@ -418,7 +418,9 @@ function GeminiNarrativeSection({ state, liveEvidence }: { state: SuccessState; 
       {narrative && (
         <div className="mt-3 flex flex-col gap-2 text-sm text-zinc-300">
           <p className="text-xs text-zinc-500">
-            Generated from {verifiedCount ?? state.unifiedFindings.length} verified Vibe Fixer findings
+            Generated from {state.unifiedFindings.length} scanned{" "}
+            {pluralise(state.unifiedFindings.length, "finding", "findings")} · {verifiedCount ?? 0} live-verified{" "}
+            {pluralise(verifiedCount ?? 0, "finding", "findings")}
           </p>
           <p>{narrative.executiveSummary}</p>
           <p className="text-xs opacity-80">{narrative.blastRadiusSummary}</p>

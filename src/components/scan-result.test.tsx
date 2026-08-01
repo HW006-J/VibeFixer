@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ScanResult, type ScanResultState } from "./scan-result";
 import type { AuditFinding } from "@/lib/audit/types";
 import { auditFindingToUnified } from "@/lib/security/from-audit";
@@ -75,6 +75,7 @@ function successState(findings: AuditFinding[], overrides: Partial<Extract<ScanR
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe("ScanResult", () => {
@@ -162,5 +163,40 @@ describe("ScanResult", () => {
 
     expect(screen.getByRole("heading", { name: /allow-all rls policy/i })).toBeTruthy();
     expect(screen.getByRole("heading", { name: /iam wildcard action/i })).toBeTruthy();
+  });
+
+  it("distinguishes scanned findings from live-verified findings in the AI narrative caption, never labelling a static finding as live-verified", async () => {
+    // Two findings were scanned in total, but the mocked backend only
+    // reports 1 as actually live-verified — reproducing the exact reported
+    // case (1 static finding exists, live verification did not confirm it).
+    const scanned = [baseFinding({ tier: "critical" }), baseFinding({ id: "id-2", tier: "high", ruleId: "VIBE_LOGIN_ONLY_POLICY" })];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        json: async () => ({
+          ok: true,
+          narrative: {
+            executiveSummary: "Summary",
+            blastRadiusSummary: "Blast",
+            prioritisedFindingIds: [],
+            remediationOrder: [],
+            uncertainty: "Uncertain",
+            missingContext: [],
+          },
+          model: "gemini-test",
+          verifiedFindingCount: 1,
+        }),
+      })) as unknown as typeof fetch,
+    );
+
+    render(<ScanResult state={successState(scanned)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /generate ai summary/i }));
+
+    await screen.findByText(/generated from 2 scanned findings/i);
+    expect(screen.getByText(/1 live-verified finding\b/i)).toBeTruthy();
+    // The old, ambiguous wording (calling the whole count "verified") must be gone.
+    expect(screen.queryByText(/^generated from \d+ verified vibe fixer findings/i)).toBeNull();
   });
 });
