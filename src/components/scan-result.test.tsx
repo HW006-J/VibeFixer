@@ -200,3 +200,45 @@ describe("ScanResult", () => {
     expect(screen.queryByText(/^generated from \d+ verified vibe fixer findings/i)).toBeNull();
   });
 });
+
+/**
+ * The trusted repair rewrites one named policy on one named table. Offering
+ * it anywhere else would either do nothing or silently do the wrong thing,
+ * so absence is the property worth testing hardest here.
+ */
+describe("ScanResult — opening a pull request with the trusted fix", () => {
+  it("does not offer the fix for a repository that is not the demo target", () => {
+    render(<ScanResult state={successState([baseFinding({})])} />);
+
+    expect(screen.queryByRole("button", { name: /open pull request with the trusted fix/i })).toBeNull();
+  });
+
+  it("offers the fix on the demo repository for an allow-all policy it can repair", () => {
+    render(<ScanResult state={successState([baseFinding({})], { isDemoRepository: true })} />);
+
+    expect(screen.getByRole("button", { name: /open pull request with the trusted fix/i })).toBeTruthy();
+  });
+
+  it("says plainly that it fixes one finding and the rest still need a human", () => {
+    render(<ScanResult state={successState([baseFinding({})], { isDemoRepository: true })} />);
+
+    expect(screen.getByText(/other findings in this report still need a human/i)).toBeTruthy();
+  });
+
+  it("does not offer the fix for a critical finding on a different table", () => {
+    const state = successState([baseFinding({ table: "public.payments", id: "id-2" })], { isDemoRepository: true });
+    render(<ScanResult state={state} />);
+
+    expect(screen.queryByRole("button", { name: /open pull request with the trusted fix/i })).toBeNull();
+  });
+
+  it("does not offer the fix for a rule the trusted repair does not address", () => {
+    const state = successState(
+      [baseFinding({ ruleId: "RLS_DISABLED_WITH_POLICIES", id: "id-3" })],
+      { isDemoRepository: true },
+    );
+    render(<ScanResult state={state} />);
+
+    expect(screen.queryByRole("button", { name: /open pull request with the trusted fix/i })).toBeNull();
+  });
+});

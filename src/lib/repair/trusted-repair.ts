@@ -38,6 +38,44 @@ create policy "${REPAIR_TARGET_POLICY_NAME}" on ${REPAIR_TARGET_TABLE} for selec
  * be offered to a human for approval. The SQL actually executed on
  * approval is always REPAIR_SQL above, never the AI's raw text.
  */
+/**
+ * The rules whose finding the trusted repair actually fixes: an allow-all
+ * USING clause on a SELECT policy. Deliberately a short explicit list
+ * rather than a severity check — "critical" says how bad a finding is, not
+ * whether this one fixed statement addresses it.
+ */
+const REPAIRABLE_RULE_IDS: ReadonlySet<string> = new Set(["RLS_ALLOW_ALL", "VIBE_ANON_ALLOW_ALL"]);
+
+function normaliseTableName(name: string): string {
+  return name.replace(/"/g, "").trim().toLowerCase();
+}
+
+/**
+ * Returns the one finding in a scan that the trusted, predefined repair
+ * genuinely fixes, or null when there is none.
+ *
+ * This exists so the UI never has to guess. REPAIR_SQL rewrites one named
+ * policy on one named table; it is not a general remedy, and offering it
+ * against any other finding would either do nothing or silently do the
+ * wrong thing. A finding being critical is not a reason to offer it.
+ *
+ * Callers must still be on the authorised demo repository — the open-PR
+ * route enforces that independently.
+ */
+export function findTrustedRepairTarget<
+  T extends { ruleId: string; table: string | null; clause: "USING" | "WITH CHECK" | null },
+>(findings: readonly T[]): T | null {
+  return (
+    findings.find(
+      (finding) =>
+        REPAIRABLE_RULE_IDS.has(finding.ruleId) &&
+        finding.clause === "USING" &&
+        finding.table !== null &&
+        normaliseTableName(finding.table) === REPAIR_TARGET_TABLE,
+    ) ?? null
+  );
+}
+
 export function isTrustedRepairExpression(expression: string): boolean {
   const normalised = normaliseExpression(expression).toLowerCase().replace(/\s+/g, "");
 
